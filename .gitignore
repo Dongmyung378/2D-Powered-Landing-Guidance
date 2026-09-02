@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Environments and local tools
+.venv/
+venv/
+.env
+.idea/
+.vscode/
+
+# Generated project outputs
+artifacts/*
+!artifacts/.gitkeep
+reports/*
+!reports/.gitkeep
+
+# Local QA intermediates
+.tmp_docx_review/
+
+# OS files
+.DS_Store
+Thumbs.db

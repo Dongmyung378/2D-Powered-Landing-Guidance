@@ -1,0 +1,55 @@
+schema_version: 1
+
+project:
+  name: powered-landing-guidance
+  python_version: 3.12.7
+
+conventions:
+  x_positive: right
+  z_positive: up
+  theta_zero: body_axis_aligned_with_positive_z
+  theta_positive: clockwise_toward_positive_x
+  gimbal_positive: clockwise_thrust_vector_from_body_axis
+  internal_angle_unit: rad
+
+simulation:
+  dt_s: 0.02
+  max_time_s: 120.0
+  integrator: rk4
+  gravity_m_s2: 9.80665
+  ground_z_m: 0.0
+
+vehicle:
+  initial_mass_kg: 1000.0
+  dry_mass_kg: 750.0
+  max_thrust_n: 20000.0
+  specific_impulse_s: 250.0
+  moment_of_inertia_kg_m2: 2500.0
+  engine_lever_arm_m: 2.0
+  throttle_min: 0.0
+  throttle_max: 1.0
+  gimbal_limit_deg: 15.0
+  drag_coefficient: 0.5
+  reference_area_m2: 1.0
+
+environment:
+  air_density_kg_m3: 1.225
+  horizontal_wind_m_s: 0.0
+
+initial_state:
+  x_m: 0.0
+  z_m: 100.0
+  vx_m_s: 0.0
+  vz_m_s: -20.0
+  theta_deg: 0.0
+  omega_deg_s: 0.0
+  mass_kg: 1000.0
+
+landing_success:
+  max_abs_x_m: 1.0
+  max_abs_vx_m_s: 1.0
+  max_abs_vz_m_s: 2.0
+  max_abs_theta_deg: 5.0
+  max_abs_omega_deg_s: 5.0
+  require_mass_at_or_above_dry_mass: true
+  evaluate_immediately_before_ground_contact: true

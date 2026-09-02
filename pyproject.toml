@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "powered-landing-guidance"
+version = "0.1.0"
+description = "Planar reusable-rocket powered-landing simulation and guidance research project"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy",
+    "scipy",
+    "PyYAML",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "ruff",
+]
+simulation = [
+    "gymnasium",
+    "matplotlib",
+    "pandas",
+    "plotly",
+    "seaborn",
+]
+optimal-control = [
+    "casadi",
+]
+learning = [
+    "torch",
+]
+rl = [
+    "stable-baselines3",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "SIM", "UP"]
