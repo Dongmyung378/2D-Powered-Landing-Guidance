@@ -48,6 +48,18 @@ thrust_x = thrust * sin(theta + gimbal_angle)
 thrust_z = thrust * cos(theta + gimbal_angle)
 ```
 
+Day 2 병진 운동방정식은 다음과 같습니다.
+
+```text
+x_dot     = vx
+z_dot     = vz
+vx_dot    = thrust_x / mass
+vz_dot    = thrust_z / mass - g
+theta_dot = omega
+omega_dot = 0       # 회전 동역학은 Day 3
+mass_dot  = 0       # 질량 감소는 Day 4
+```
+
 엔진이 질량중심 아래에 있다는 가정에서는 양의 추력 벡터 편향이 양의 자세 회전과 반대 방향의 토크를 만들 수 있습니다. 회전 동역학 구현 시 레버암과 외적을 이용해 토크 부호를 다시 검증하고 analytic test로 고정합니다.
 
 ## 4. 상태 벡터
@@ -107,10 +119,12 @@ control = [throttle, gimbal_angle]
 
 이 값들은 초기 권장값이며 `configs/default.yaml`에서 관리합니다. 이후 평가 시 모든 제어기에 동일한 seed와 초기조건을 적용합니다.
 
-## 8. Day 2 구현 전 확인사항
+## 8. Day 2 검증 기준
 
 - 상태와 제어 순서를 코드 상수와 대조
-- 각도 입력을 내부에서 radian으로 변환하는 위치 결정
-- 자유낙하에서 `vz`가 감소하는지 확인할 analytic test 준비
-- 수직 추력에서 `x`, `vx`, `theta`, `omega`가 변하지 않는지 확인할 test 준비
-- Euler와 RK4 또는 SciPy 적분 결과 비교 기준 정의
+- 자유낙하 수치 결과를 `z(t) = z0 + vz0*t - 0.5*g*t^2`와 비교
+- 자유낙하 수치 결과를 `vz(t) = vz0 - g*t`와 비교
+- 수직 추력 결과를 일정 가속도 해석해와 비교
+- 수직 추력에서 `x`, `vx`, `theta`, `omega`, `mass`가 의도대로 유지되는지 확인
+- Euler의 시간 간격을 줄였을 때 해석해 오차가 감소하는지 확인
+- RK4가 일정 가속도 해석해와 수치 정밀도 범위에서 일치하는지 확인
