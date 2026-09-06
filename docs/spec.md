@@ -148,7 +148,7 @@ applied_gimbal   = clip(commanded_gimbal, -gimbal_limit, +gimbal_limit)
 
 ## API
 
-`RocketLandingEnv(config)`에 `load_config`로 읽은 dict를 전달합니다. 생성자는 설정을 복사하고 초기 상태, sampling 범위, 단위, 적분기, 착륙 한계값을 검증합니다. 내부 동역학은 기존 `simulate_planar`를 사용합니다.
+`RocketLandingEnv(config)`에 `load_config`로 읽은 dict를 전달합니다. 생성자는 설정을 복사하고 초기 상태, sampling 범위, 단위, 적분기, 착륙 한계값을 검증합니다. 내부 동역학은 `simulate_planar`를 사용합니다.
 
 - `reset(seed=None, options=None) -> (observation, info)`
 - `step(action) -> (observation, reward, terminated, truncated, info)`
@@ -211,3 +211,9 @@ reset 이전 또는 종료 이후의 step은 오류입니다. reset은 새 에�
 각 steps 원소에는 index, time_s, state, commanded_action, clipped_action, thrust_start_n, thrust_end_n, fuel_used_kg, reward, terminated, truncated, outcome, is_success가 들어갑니다. fuel_used_kg는 초기 질량과 현재 질량의 차이입니다. clipped_action은 액추에이터 제한 명령이며 실제 연료 차단 여부는 thrust_start_n/end_n으로 구분합니다. 상태·반환 info·로그를 외부에서 변경해도 환경 내부 기록이 바뀌지 않도록 복사합니다.
 
 API 참고: [Gymnasium Env](https://gymnasium.farama.org/api/env/), [환경 검사기](https://gymnasium.farama.org/api/utils/).
+
+## 기록 재생과 시각화
+
+`save_episode_data`는 같은 에피소드 기록을 JSON 또는 압축 NPZ로 저장합니다. NPZ에는 원본 JSON과 검증용 `times_s`, `states`, `actions`, `thrust_n` 배열을 함께 저장하며 객체 pickle은 사용하지 않습니다. `actions`는 각 step에 적용한 명령이고 나머지 배열은 초기 프레임을 포함합니다. `load_episode_data`는 배열과 원본 기록의 일치 여부를 확인합니다. 두 형식 모두 저장된 상태를 직접 읽으므로 물리 모델을 다시 실행하지 않습니다.
+
+시계열 그래프는 위치, 속도, 자세·각속도, 질량, throttle, gimbal을 표시합니다. 2D 애니메이션은 x-z 궤적, 로켓 자세, 추력 벡터, 지면과 x=0 착륙 목표를 표시합니다. 로켓 도형은 부호 확인용이며 실제 크기나 착륙 다리 형상을 나타내지 않습니다. GIF는 기본 지원하고 MP4는 FFmpeg가 있을 때 지원합니다. 출력 파일은 기존 파일을 덮어쓰지 않습니다.

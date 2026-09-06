@@ -1,6 +1,6 @@
 # Powered Landing Guidance
 
-2차원 재사용 로켓의 동력 착륙 시뮬레이션 프로젝트입니다. 현재 5일차까지의 병진·회전·연료 소모, Gymnasium 환경, 종료 판정과 JSON 로그가 구현되어 있습니다. 자동착륙 제어기는 아직 없습니다.
+2차원 재사용 로켓의 동력 착륙 시뮬레이션 프로젝트입니다. 현재 6일차까지의 물리 모델, Gymnasium 환경, 종료 판정, 기록 저장과 시각화가 구현되어 있습니다. 자동착륙 제어기는 아직 없습니다.
 
 ## 설치와 검증
 
@@ -23,15 +23,24 @@ python -m ruff check --no-cache .
 python scripts/run_episode.py --nominal
 ```
 
-초기조건과 고정 추력을 지정하고 기록 저장:
+초기조건과 고정 추력을 지정하고 JSON 기록, 그래프와 애니메이션 저장:
 
 ```powershell
-python scripts/run_episode.py --initial-state 0 100 0 -20 0 0 1000 --throttle 0.5 --gimbal-deg 0 --output artifacts/episode.json
+python scripts/run_episode.py --initial-state 0 100 0 -20 0 0 1000 --throttle 0.5 --gimbal-deg 0 --output artifacts/episode.json --plot artifacts/episode.png --animation artifacts/episode.gif
 ```
 
 초기조건 순서는 `x z vx vz theta omega mass`이며 SI 단위입니다. 자세각과 각속도는 rad, rad/s이고, CLI의 `--gimbal-deg`만 degree를 받습니다. `--nominal` 또는 `--initial-state`를 생략하면 YAML 범위에서 초기조건을 추출합니다. `--seed` 기본값은 42입니다. 저장 폴더는 자동 생성하며 기존 로그는 덮어쓰지 않습니다.
 
 고정 명령을 적용하는 물리 실험이며 착륙 제어기가 아닙니다.
+
+저장된 JSON 또는 NPZ는 물리를 다시 계산하지 않고 그래프와 애니메이션으로 재생할 수 있습니다.
+
+```powershell
+python scripts/run_episode.py --replay artifacts/episode.json --plot artifacts/replay.png --animation artifacts/replay.gif
+python scripts/run_episode.py --nominal --output artifacts/episode.npz
+```
+
+GIF는 별도 프로그램 없이 생성할 수 있습니다. MP4 저장에는 FFmpeg가 필요합니다. 애니메이션에는 x-z 궤적, 로켓 자세, 추력 방향, 착륙 목표, throttle, gimbal, 질량과 종료 원인이 표시됩니다.
 
 ## Python API
 
@@ -53,7 +62,7 @@ env.close()
 
 ## 파일 구성
 
-- `src/powered_landing_guidance/`: 상태 정의, 설정 검증, 동역학, 적분기, 환경
+- `src/powered_landing_guidance/`: 상태, 설정, 동역학, 환경, 기록·시각화
 - `tests/`: 모델·동역학·환경 테스트
 - `scripts/run_episode.py`: 실험 실행
 - `configs/default.yaml`, `docs/spec.md`: 설정과 명세
@@ -64,7 +73,7 @@ env.close()
 
 PID, 최적제어 teacher, Behavior Cloning, DAgger를 구현한 뒤 동일한 초기조건과 외란에서 비교할 예정입니다. 현재 관성모멘트와 레버암은 고정이고, 공기저항·바람·센서 노이즈는 적용하지 않습니다. YAML의 항력·바람 항목은 후속 구현용입니다. 접촉은 점 위치 기준이며 실제 하드웨어 실험용 모델이 아닙니다.
 
-입력 화면과 애니메이션은 기존 계획대로 7주차 마지막에 제작합니다.
+완성형 입력 화면과 제어기 비교 애니메이션은 기존 계획대로 7주차 마지막에 제작합니다.
 
 - 43-46일차: 코드 정리, 결과 그래프, 보고서와 README
 - 47일차: 초기조건·외란·seed·제어기 선택 화면

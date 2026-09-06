@@ -12,6 +12,13 @@ from gymnasium.utils.env_checker import check_env
 
 from powered_landing_guidance import load_config
 from powered_landing_guidance.envs import RocketLandingEnv
+from powered_landing_guidance.visualization import (
+    episode_trajectory,
+    load_episode_data,
+    save_animation,
+    save_episode_data,
+    save_time_series,
+)
 
 CONFIG = load_config(Path(__file__).resolve().parents[1] / "configs/default.yaml")
 
@@ -280,3 +287,60 @@ def test_nominal_random_policy_episode_is_finite_and_logs_termination(seed):
             break
     assert info["outcome"] == "timeout"
     assert env.episode_log["outcome"] == "timeout"
+
+
+def _recorded_success_episode():
+    env = env_with()
+    try:
+        env.reset(seed=7, options={"initial_state": [0, 0.001, 0, -0.1, 0, 0, 900]})
+        env.step([0, 0])
+        return env.episode_log
+    finally:
+        env.close()
+
+
+def test_episode_json_and_npz_round_trip_without_resimulation(tmp_path):
+    episode = _recorded_success_episode()
+    json_path = save_episode_data(episode, tmp_path / "episode.json")
+    npz_path = save_episode_data(episode, tmp_path / "episode.npz")
+
+    assert load_episode_data(json_path) == episode
+    assert load_episode_data(npz_path) == episode
+    trajectory = episode_trajectory(load_episode_data(npz_path))
+    assert trajectory.states.shape == (2, 7)
+    assert trajectory.actions.shape == (1, 2)
+    assert trajectory.outcomes[-1] == "success"
+    with pytest.raises(FileExistsError):
+        save_episode_data(episode, npz_path)
+
+
+def test_trajectory_keeps_one_action_per_step():
+    env = env_with(dt_s=0.02, max_time_s=0.05)
+    try:
+        env.reset(options={"initial_state": [0, 100, 0, 0, 0, 0, 900]})
+        env.step([0.2, 0.0])
+        env.step([0.8, 0.1])
+        trajectory = episode_trajectory(env.episode_log)
+    finally:
+        env.close()
+
+    np.testing.assert_allclose(trajectory.actions, [[0.2, 0.0], [0.8, 0.1]])
+    assert trajectory.states.shape == (3, 7)
+
+
+def test_recorded_episode_plot_and_animation(tmp_path):
+    episode = _recorded_success_episode()
+    plot_path = save_time_series(episode, tmp_path / "states.png")
+    animation_path = save_animation(episode, tmp_path / "landing.gif", fps=10)
+
+    assert plot_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert animation_path.read_bytes().startswith(b"GIF89a")
+    with pytest.raises(FileExistsError):
+        save_animation(episode, animation_path)
+
+
+def test_episode_rejects_inconsistent_coordinate_order():
+    episode = _recorded_success_episode()
+    episode["state_names"][0] = "z"
+    with pytest.raises(ValueError, match="state order"):
+        episode_trajectory(episode)

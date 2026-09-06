@@ -13,6 +13,7 @@ dependencies = [
     "scipy",
     "PyYAML",
     "gymnasium>=1.0,<2",
+    "matplotlib>=3.8,<4",
 ]
 
 [project.optional-dependencies]
@@ -20,22 +21,6 @@ dev = [
     "pytest>=7",
     "ruff",
 ]
-simulation = [
-    "matplotlib",
-    "pandas",
-    "plotly",
-    "seaborn",
-]
-optimal-control = [
-    "casadi",
-]
-learning = [
-    "torch",
-]
-rl = [
-    "stable-baselines3",
-]
-
 [tool.setuptools.packages.find]
 where = ["src"]
 
