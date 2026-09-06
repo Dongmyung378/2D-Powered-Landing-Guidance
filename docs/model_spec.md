@@ -56,11 +56,29 @@ z_dot     = vz
 vx_dot    = thrust_x / mass
 vz_dot    = thrust_z / mass - g
 theta_dot = omega
-omega_dot = 0       # 회전 동역학은 Day 3
-mass_dot  = 0       # 질량 감소는 Day 4
+omega_dot = torque / moment_of_inertia
+mass_dot  = -thrust / (specific_impulse * standard_gravity)
 ```
 
-엔진이 질량중심 아래에 있다는 가정에서는 양의 추력 벡터 편향이 양의 자세 회전과 반대 방향의 토크를 만들 수 있습니다. 회전 동역학 구현 시 레버암과 외적을 이용해 토크 부호를 다시 검증하고 analytic test로 고정합니다.
+질량이 건조 질량에 도달하면 적용 추력, 토크와 질량 유량을 모두 0으로 설정합니다.
+
+```text
+if mass <= dry_mass:
+    applied_thrust = 0
+    torque = 0
+    mass_dot = 0
+```
+
+`standard_gravity`는 비추력 `s`를 유효 배기속도 `m/s`로 변환하기 위한 표준중력이며, 시뮬레이션 환경에 적용하는 `gravity`와 구분합니다.
+
+엔진 작용점은 질량중심 아래의 로켓 길이 방향 축 위에 있다고 가정합니다. 엔진 레버암의 길이를 `l`, 추력을 `T`, 짐벌각을 `delta`라고 하면 현재 부호 규약에서 토크는 다음과 같습니다.
+
+```text
+torque    = -l * T * sin(delta)
+omega_dot = torque / moment_of_inertia
+```
+
+따라서 양의 짐벌은 음의 자세 토크와 각가속도를 만들고, 음의 짐벌은 양의 자세 토크와 각가속도를 만듭니다.
 
 ## 4. 상태 벡터
 
@@ -95,6 +113,13 @@ control = [throttle, gimbal_angle]
 
 설정 파일에서 사람이 읽기 쉬운 각도 제한과 초기값은 `_deg` 접미사를 사용합니다. 시뮬레이터 경계에서 한 번만 radian으로 변환하고, 내부 계산·로그·학습 데이터에는 radian을 사용합니다.
 
+제어기가 생성하는 원시 명령은 물리 모델에 들어가기 전에 다음과 같이 제한합니다.
+
+```text
+applied_throttle = clip(commanded_throttle, throttle_min, throttle_max)
+applied_gimbal   = clip(commanded_gimbal, -gimbal_limit, +gimbal_limit)
+```
+
 ## 6. 기본 제한과 불변조건
 
 - `mass >= dry_mass`
@@ -128,3 +153,32 @@ control = [throttle, gimbal_angle]
 - 수직 추력에서 `x`, `vx`, `theta`, `omega`, `mass`가 의도대로 유지되는지 확인
 - Euler의 시간 간격을 줄였을 때 해석해 오차가 감소하는지 확인
 - RK4가 일정 가속도 해석해와 수치 정밀도 범위에서 일치하는지 확인
+
+## 9. Day 3 검증 기준
+
+- 설정의 `gimbal_limit_deg`가 내부에서 정확히 radian으로 변환됨
+- 범위를 벗어난 throttle과 gimbal 명령이 안전하게 제한됨
+- 잘못된 형상이나 NaN을 포함한 제어 명령이 거부됨
+- 양의 짐벌에서 음의 토크, 음의 짐벌에서 양의 토크가 발생함
+- throttle 또는 gimbal이 0이면 추력 토크가 0임
+- 각가속도가 `torque / moment_of_inertia`와 일치함
+- 양·음 짐벌 회전 결과가 일정 각가속도 해석해와 일치함
+- 내부 상태와 동역학 계산에서 각도 단위로 radian만 사용함
+
+## 10. Day 4 검증 기준
+
+- 질량 유량이 `thrust / (specific_impulse * standard_gravity)`와 일치함
+- 질량 유량이 throttle에 비례함
+- 연료가 남아 있는 동안 시간에 따른 질량이 해석해와 일치함
+- throttle이 0이면 질량이 감소하지 않음
+- 건조 질량에서 추력, 토크와 질량 유량이 모두 0임
+- 초기 질량이 건조 질량보다 작으면 시뮬레이션을 거부함
+- 한 적분 스텝 중간에 연료가 소진되어도 질량이 건조 질량 아래로 내려가지 않음
+- 소진 이후 운동이 무추력 탄도 운동과 일치함
+
+## 11. Day 5 환경 인터페이스
+
+`RocketLandingEnv`는 이 물리 모델을 사용해 seed 기반 reset, 매 스텝 제어,
+지면 접촉·연료 고갈·시간초과의 종료 판정과 JSON 로그를 제공합니다.
+환경의 fuel_depletion 종료 규칙은 소진 후에도 운동을 계속 계산하는 물리 함수와 별개입니다.
+자세한 정의와 사용법은 [환경 명세](env_spec.md)를 참조합니다.

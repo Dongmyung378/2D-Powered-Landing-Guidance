@@ -12,6 +12,7 @@ dependencies = [
     "numpy",
     "scipy",
     "PyYAML",
+    "gymnasium>=1.0,<2",
 ]
 
 [project.optional-dependencies]
@@ -20,7 +21,6 @@ dev = [
     "ruff",
 ]
 simulation = [
-    "gymnasium",
     "matplotlib",
     "pandas",
     "plotly",

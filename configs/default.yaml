@@ -24,6 +24,7 @@ vehicle:
   dry_mass_kg: 750.0
   max_thrust_n: 20000.0
   specific_impulse_s: 250.0
+  standard_gravity_m_s2: 9.80665
   moment_of_inertia_kg_m2: 2500.0
   engine_lever_arm_m: 2.0
   throttle_min: 0.0
@@ -44,6 +45,17 @@ initial_state:
   theta_deg: 0.0
   omega_deg_s: 0.0
   mass_kg: 1000.0
+
+# Independent uniform ranges, using the same units as initial_state.
+# reset(options={"randomize": false}) selects the nominal initial_state.
+initial_state_sampling:
+  x_m: [-20.0, 20.0]
+  z_m: [80.0, 120.0]
+  vx_m_s: [-3.0, 3.0]
+  vz_m_s: [-25.0, -15.0]
+  theta_deg: [-5.0, 5.0]
+  omega_deg_s: [-2.0, 2.0]
+  mass_kg: [950.0, 1000.0]
 
 landing_success:
   max_abs_x_m: 1.0

@@ -61,6 +61,7 @@ def validate_config(config: Config) -> None:
     initial_mass = _positive(vehicle, "initial_mass_kg")
     _positive(vehicle, "max_thrust_n")
     _positive(vehicle, "specific_impulse_s")
+    _positive(vehicle, "standard_gravity_m_s2")
     _positive(vehicle, "moment_of_inertia_kg_m2")
     _positive(vehicle, "engine_lever_arm_m")
     _positive(vehicle, "gimbal_limit_deg")
