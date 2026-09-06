@@ -1,7 +1,8 @@
-"""YAML configuration loading and Day 1 schema validation."""
+"""YAML configuration loading and validation."""
 
 from __future__ import annotations
 
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -23,13 +24,18 @@ def _mapping(parent: Config, key: str) -> Config:
 
 def _positive(mapping: Config, key: str) -> float:
     value = mapping.get(key)
-    if not isinstance(value, int | float) or isinstance(value, bool) or value <= 0:
+    if (
+        not isinstance(value, int | float)
+        or isinstance(value, bool)
+        or not isfinite(value)
+        or value <= 0
+    ):
         raise ConfigError(f"'{key}' must be a positive number")
     return float(value)
 
 
 def validate_config(config: Config) -> None:
-    """Validate the stable Day 1 configuration contract."""
+    """Check model conventions, physical parameters and initial-state fields."""
     project = _mapping(config, "project")
     conventions = _mapping(config, "conventions")
     simulation = _mapping(config, "simulation")

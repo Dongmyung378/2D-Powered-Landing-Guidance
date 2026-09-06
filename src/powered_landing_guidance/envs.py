@@ -1,4 +1,4 @@
-"""Seeded Gymnasium environment for the Day 5 landing task.
+"""Seeded Gymnasium environment for planar rocket landing.
 
 Ground contact uses the model's point-position z, not landing-leg geometry.
 Physics is integrated with the existing Euler/RK4 model, including fuel cutoff.
@@ -203,8 +203,8 @@ class RocketLandingEnv(gym.Env):
             return 0.0, state.copy()
         bracket_end = duration
         if end[1] > self.ground:
-            height_tolerance = 64 * np.finfo(float).eps * max(
-                1.0, abs(self.ground), abs(state[1]), abs(end[1])
+            height_tolerance = (
+                64 * np.finfo(float).eps * max(1.0, abs(self.ground), abs(state[1]), abs(end[1]))
             )
             if end[1] - self.ground <= height_tolerance and end[3] <= 0:
                 contact_state = end.copy()
@@ -242,7 +242,7 @@ class RocketLandingEnv(gym.Env):
         target = min(self._time + self.dt, self.max_time)
         state, time = before.copy(), self._time
         outcome = "running"
-        mass_tol = np.finfo(float).eps * self.parameters.dry_mass_kg * 8
+        mass_tol = self.parameters.mass_tolerance_kg
         if state[1] <= self.ground:
             outcome = self._contact_outcome(state)
         elif state[6] <= self.parameters.dry_mass_kg + mass_tol:

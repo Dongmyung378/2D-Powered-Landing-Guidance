@@ -1,4 +1,4 @@
-"""Day 1 contract and installation smoke tests."""
+"""Package metadata, state vectors and configuration checks."""
 
 from __future__ import annotations
 
@@ -50,4 +50,12 @@ def test_config_rejects_initial_mass_below_dry_mass() -> None:
     config["initial_state"]["mass_kg"] = config["vehicle"]["dry_mass_kg"] - 1.0
 
     with pytest.raises(plg.ConfigError, match="initial_state.mass_kg"):
+        plg.validate_config(config)
+
+
+@pytest.mark.parametrize("value", [np.nan, np.inf, -np.inf, True, 0, -1])
+def test_config_rejects_invalid_positive_parameters(value) -> None:
+    config = deepcopy(plg.load_config(DEFAULT_CONFIG))
+    config["simulation"]["dt_s"] = value
+    with pytest.raises(plg.ConfigError, match="dt_s"):
         plg.validate_config(config)

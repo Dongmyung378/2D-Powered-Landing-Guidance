@@ -1,4 +1,4 @@
-"""Planar rigid-body dynamics through Day 3 of the project roadmap."""
+"""Planar rigid-body dynamics with variable mass and thrust cutoff."""
 
 from __future__ import annotations
 
@@ -8,10 +8,13 @@ from typing import Any
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from powered_landing_guidance.dynamics.integrators import (
+from powered_landing_guidance.integrators import (
     IntegrationMethod,
     euler_step,
     rk4_step,
+)
+from powered_landing_guidance.integrators import (
+    integrate_fixed_step as integrate_fixed_step,
 )
 from powered_landing_guidance.model import Control, State
 
@@ -32,6 +35,11 @@ class PlanarDynamicsParameters:
     throttle_min: float
     throttle_max: float
     gimbal_limit_rad: float
+
+    @property
+    def mass_tolerance_kg(self) -> float:
+        """Roundoff allowance shared by fuel cutoff and event detection."""
+        return float(np.finfo(np.float64).eps * max(1.0, self.dry_mass_kg) * 8.0)
 
     def __post_init__(self) -> None:
         positive_values = (
@@ -95,15 +103,18 @@ def clip_control(command: ControlInput, parameters: PlanarDynamicsParameters) ->
 
 
 def _validate_mass(state: State, parameters: PlanarDynamicsParameters) -> None:
-    tolerance = np.finfo(np.float64).eps * max(1.0, parameters.dry_mass_kg) * 8.0
-    if state.mass < parameters.dry_mass_kg - tolerance:
+    if state.mass < parameters.dry_mass_kg - parameters.mass_tolerance_kg:
         raise ValueError("state mass cannot be below dry mass")
 
 
-def _has_propellant(state: State, parameters: PlanarDynamicsParameters) -> bool:
+def _thrust_after_cutoff(
+    state: State, control: Control, parameters: PlanarDynamicsParameters
+) -> float:
+    """Apply fuel cutoff to an already-clipped command."""
     _validate_mass(state, parameters)
-    tolerance = np.finfo(np.float64).eps * max(1.0, parameters.dry_mass_kg) * 8.0
-    return state.mass > parameters.dry_mass_kg + tolerance
+    if state.mass <= parameters.dry_mass_kg + parameters.mass_tolerance_kg:
+        return 0.0
+    return control.throttle * parameters.max_thrust_n
 
 
 def applied_thrust_n(
@@ -113,9 +124,7 @@ def applied_thrust_n(
 ) -> float:
     """Return thrust after command clipping and dry-mass cutoff."""
     control = clip_control(command, parameters)
-    if not _has_propellant(state, parameters):
-        return 0.0
-    return control.throttle * parameters.max_thrust_n
+    return _thrust_after_cutoff(state, control, parameters)
 
 
 def propellant_mass_flow_rate_kg_s(
@@ -136,7 +145,7 @@ def thrust_vector(
 ) -> NDArray[np.float64]:
     """Return inertial ``[Fx, Fz]`` after actuator and fuel limits."""
     control = clip_control(command, parameters)
-    thrust_n = applied_thrust_n(state, control, parameters)
+    thrust_n = _thrust_after_cutoff(state, control, parameters)
     direction_rad = state.theta + control.gimbal_angle
     return thrust_n * np.asarray((np.sin(direction_rad), np.cos(direction_rad)))
 
@@ -153,7 +162,7 @@ def thrust_torque_nm(
     attitude torque under the documented convention.
     """
     control = clip_control(command, parameters)
-    thrust_n = applied_thrust_n(state, control, parameters)
+    thrust_n = _thrust_after_cutoff(state, control, parameters)
     return float(-parameters.engine_lever_arm_m * thrust_n * np.sin(control.gimbal_angle))
 
 
@@ -163,7 +172,6 @@ def translational_acceleration(
     parameters: PlanarDynamicsParameters,
 ) -> NDArray[np.float64]:
     """Return inertial ``[ax, az]`` using the state's current mass."""
-    _validate_mass(state, parameters)
     acceleration = thrust_vector(state, command, parameters) / state.mass
     acceleration[1] -= parameters.gravity_m_s2
     return acceleration
@@ -190,9 +198,7 @@ def _derivative_from_thrust(
     az = force[1] / state.mass - parameters.gravity_m_s2
     torque_nm = -parameters.engine_lever_arm_m * thrust_n * np.sin(control.gimbal_angle)
     angular_acceleration = torque_nm / parameters.moment_of_inertia_kg_m2
-    mass_flow_rate = thrust_n / (
-        parameters.specific_impulse_s * parameters.standard_gravity_m_s2
-    )
+    mass_flow_rate = thrust_n / (parameters.specific_impulse_s * parameters.standard_gravity_m_s2)
     return np.asarray(
         (
             state.vx,
@@ -215,9 +221,8 @@ def state_derivative(
 ) -> NDArray[np.float64]:
     """Return ``d/dt [x, z, vx, vz, theta, omega, mass]``."""
     state = State.from_array(state_vector)
-    _validate_mass(state, parameters)
     applied_control = clip_control(command, parameters)
-    thrust_n = applied_thrust_n(state, applied_control, parameters)
+    thrust_n = _thrust_after_cutoff(state, applied_control, parameters)
     return _derivative_from_thrust(state, applied_control, parameters, thrust_n)
 
 
@@ -254,7 +259,7 @@ def simulate_planar(
         parameters.specific_impulse_s * parameters.standard_gravity_m_s2
     )
     tolerance = np.finfo(np.float64).eps * max(1.0, duration_s) * 8.0
-    mass_tolerance = np.finfo(np.float64).eps * max(1.0, parameters.dry_mass_kg) * 8.0
+    mass_tolerance = parameters.mass_tolerance_kg
 
     times = [0.0]
     states = [initial_vector.copy()]
@@ -263,8 +268,8 @@ def simulate_planar(
         state = State.from_array(vector)
         return _derivative_from_thrust(state, applied_control, parameters, nominal_thrust_n)
 
-    def unpowered_derivative(time_s: float, vector: NDArray[np.float64]) -> NDArray[np.float64]:
-        return state_derivative(time_s, vector, Control(0.0, 0.0), parameters)
+    def unpowered_derivative(_time_s: float, vector: NDArray[np.float64]) -> NDArray[np.float64]:
+        return _derivative_from_thrust(State.from_array(vector), applied_control, parameters, 0.0)
 
     while times[-1] < duration_s - tolerance:
         step_start_s = times[-1]

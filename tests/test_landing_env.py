@@ -1,4 +1,4 @@
-"""Day 5 API, event timing, reproducibility and logging regression tests."""
+"""Environment API, event timing, reproducibility and logging checks."""
 
 from __future__ import annotations
 

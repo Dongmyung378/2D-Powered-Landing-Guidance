@@ -17,13 +17,8 @@ venv/
 .vscode/
 
 # Generated project outputs
-artifacts/*
-!artifacts/.gitkeep
-reports/*
-!reports/.gitkeep
-
-# Local QA intermediates
-.tmp_docx_review/
+artifacts/
+reports/
 
 # OS files
 .DS_Store
