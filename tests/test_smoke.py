@@ -59,3 +59,69 @@ def test_config_rejects_invalid_positive_parameters(value) -> None:
     config["simulation"]["dt_s"] = value
     with pytest.raises(plg.ConfigError, match="dt_s"):
         plg.validate_config(config)
+
+
+@pytest.mark.parametrize(
+    ("section", "key", "value"),
+    [
+        ("simulation", "ground_z_m", np.nan),
+        ("initial_state", "x_m", np.inf),
+        ("initial_state", "mass_kg", True),
+        ("vehicle", "throttle_min", False),
+    ],
+)
+def test_config_rejects_non_finite_or_boolean_numbers(section, key, value) -> None:
+    config = deepcopy(plg.load_config(DEFAULT_CONFIG))
+    config[section][key] = value
+    with pytest.raises(plg.ConfigError, match=key):
+        plg.validate_config(config)
+
+
+@pytest.mark.parametrize(
+    ("section", "key", "value", "message"),
+    [
+        ("simulation", "integrator", "unknown", "integrator"),
+        ("initial_state", "z_m", -1.0, "z_m"),
+        ("vehicle", "gimbal_limit_deg", 91.0, "gimbal_limit_deg"),
+        (
+            "conventions",
+            "theta_zero",
+            "positive_x",
+            "theta_zero",
+        ),
+        (
+            "landing_success",
+            "evaluate_immediately_before_ground_contact",
+            False,
+            "evaluate_immediately_before_ground_contact",
+        ),
+    ],
+)
+def test_config_rejects_inconsistent_model_contract(section, key, value, message) -> None:
+    config = deepcopy(plg.load_config(DEFAULT_CONFIG))
+    config[section][key] = value
+    with pytest.raises(plg.ConfigError, match=message):
+        plg.validate_config(config)
+
+
+def test_week1_sanity_and_termination_verification() -> None:
+    from scripts.verify_week1 import verify_model_sanity, verify_termination_cases
+
+    config = plg.load_config(DEFAULT_CONFIG)
+    sanity = verify_model_sanity(config)
+    termination = verify_termination_cases(config)
+
+    assert len(sanity) == 5
+    assert set(termination) == {"success", "hard_landing", "crash", "fuel_depletion", "timeout"}
+
+
+def test_random_action_verification_is_reproducible() -> None:
+    from scripts.verify_week1 import run_random_action_check
+
+    config = plg.load_config(DEFAULT_CONFIG)
+    first = run_random_action_check(config, episodes=3, seed=20260907)
+    second = run_random_action_check(config, episodes=3, seed=20260907)
+
+    assert first == second
+    assert first.episodes == 3
+    assert first.steps > 0

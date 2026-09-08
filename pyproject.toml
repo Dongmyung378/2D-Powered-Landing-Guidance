@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "powered-landing-guidance"
 version = "0.1.0"
-description = "Planar reusable-rocket powered-landing simulation and guidance research project"
+description = "2D 재사용 로켓 동력 착륙 시뮬레이션과 유도 연구 프로젝트"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [

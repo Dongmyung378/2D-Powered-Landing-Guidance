@@ -1,4 +1,4 @@
-"""Run a constant-command episode or replay a saved recording."""
+"""고정 제어 명령으로 에피소드를 실행하거나 저장된 기록을 재생한다."""
 
 from __future__ import annotations
 
@@ -24,35 +24,35 @@ def main() -> None:
         type=Path,
         default=Path(__file__).resolve().parents[1] / "configs/default.yaml",
     )
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--replay", type=Path, help="Load JSON/NPZ without running physics")
+    parser.add_argument("--seed", type=int, default=42, help="초기조건을 재현할 seed")
+    parser.add_argument("--replay", type=Path, help="물리 계산 없이 JSON 또는 NPZ 기록 재생")
     initial = parser.add_mutually_exclusive_group()
-    initial.add_argument("--nominal", action="store_true", help="Use YAML initial_state")
+    initial.add_argument("--nominal", action="store_true", help="YAML의 명목 초기조건 사용")
     initial.add_argument(
         "--initial-state",
         type=float,
         nargs=7,
         metavar=("X", "Z", "VX", "VZ", "THETA", "OMEGA", "MASS"),
-        help="Initial state in SI units; angles in radians",
+        help="SI 단위 초기 상태이며 각도는 radian",
     )
     parser.add_argument("--throttle", type=float, default=0.0)
     parser.add_argument("--gimbal-deg", type=float, default=0.0)
-    parser.add_argument("--output", type=Path, help="Save the episode as JSON or NPZ")
-    parser.add_argument("--plot", type=Path, help="Save state and control histories as PNG")
-    parser.add_argument("--animation", type=Path, help="Save the recorded trajectory as GIF or MP4")
+    parser.add_argument("--output", type=Path, help="에피소드를 JSON 또는 NPZ로 저장")
+    parser.add_argument("--plot", type=Path, help="상태와 제어 기록을 PNG로 저장")
+    parser.add_argument("--animation", type=Path, help="기록된 궤적을 GIF 또는 MP4로 저장")
     parser.add_argument("--fps", type=int, default=30)
     args = parser.parse_args()
     outputs = [path for path in (args.output, args.plot, args.animation) if path]
     output_paths = [str(path.resolve()).casefold() for path in outputs]
     if len(output_paths) != len(set(output_paths)):
-        parser.error("output paths must be different")
+        parser.error("출력 파일 경로는 서로 달라야 합니다")
     existing = [path for path in outputs if path.exists()]
     if existing:
-        parser.error(f"output already exists: {existing[0]}")
+        parser.error(f"출력 파일이 이미 존재합니다: {existing[0]}")
     if args.replay and (args.nominal or args.initial_state is not None):
-        parser.error("--replay cannot be combined with initial-state options")
+        parser.error("--replay는 초기조건 옵션과 함께 사용할 수 없습니다")
     if args.replay and (args.throttle != 0.0 or args.gimbal_deg != 0.0):
-        parser.error("--replay cannot be combined with control options")
+        parser.error("--replay는 제어 명령 옵션과 함께 사용할 수 없습니다")
 
     if args.replay:
         episode = load_episode_data(args.replay)
@@ -78,14 +78,17 @@ def main() -> None:
         finally:
             env.close()
 
-    print(f"{info['outcome']}: t={info['time_s']:.6f} s, fuel={info['fuel_used_kg']:.6f} kg")
-    print(f"State [x, z, vx, vz, theta, omega, mass]: {state.tolist()}")
+    print(
+        f"종료 결과={info['outcome']}, 시간={info['time_s']:.6f} s, "
+        f"사용 연료={info['fuel_used_kg']:.6f} kg"
+    )
+    print(f"상태 [x, z, vx, vz, theta, omega, mass]: {state.tolist()}")
     if args.output:
-        print(f"Saved: {save_episode_data(episode, args.output)}")
+        print(f"저장 완료: {save_episode_data(episode, args.output)}")
     if args.plot:
-        print(f"Saved: {save_time_series(episode, args.plot)}")
+        print(f"저장 완료: {save_time_series(episode, args.plot)}")
     if args.animation:
-        print(f"Saved: {save_animation(episode, args.animation, fps=args.fps)}")
+        print(f"저장 완료: {save_animation(episode, args.animation, fps=args.fps)}")
 
 
 if __name__ == "__main__":

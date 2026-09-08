@@ -23,14 +23,16 @@ def _mapping(parent: Config, key: str) -> Config:
 
 
 def _positive(mapping: Config, key: str) -> float:
-    value = mapping.get(key)
-    if (
-        not isinstance(value, int | float)
-        or isinstance(value, bool)
-        or not isfinite(value)
-        or value <= 0
-    ):
+    value = _finite(mapping, key)
+    if value <= 0:
         raise ConfigError(f"'{key}' must be a positive number")
+    return value
+
+
+def _finite(mapping: Config, key: str) -> float:
+    value = mapping.get(key)
+    if not isinstance(value, int | float) or isinstance(value, bool) or not isfinite(value):
+        raise ConfigError(f"'{key}' must be a finite number")
     return float(value)
 
 
@@ -49,6 +51,7 @@ def validate_config(config: Config) -> None:
     expected_conventions = {
         "x_positive": "right",
         "z_positive": "up",
+        "theta_zero": "body_axis_aligned_with_positive_z",
         "theta_positive": "clockwise_toward_positive_x",
         "gimbal_positive": "clockwise_thrust_vector_from_body_axis",
         "internal_angle_unit": "rad",
@@ -60,8 +63,11 @@ def validate_config(config: Config) -> None:
     dt = _positive(simulation, "dt_s")
     max_time = _positive(simulation, "max_time_s")
     _positive(simulation, "gravity_m_s2")
+    ground = _finite(simulation, "ground_z_m")
     if max_time <= dt:
         raise ConfigError("simulation.max_time_s must be greater than simulation.dt_s")
+    if simulation.get("integrator") not in {"euler", "rk4"}:
+        raise ConfigError("simulation.integrator must be 'euler' or 'rk4'")
 
     dry_mass = _positive(vehicle, "dry_mass_kg")
     initial_mass = _positive(vehicle, "initial_mass_kg")
@@ -70,14 +76,14 @@ def validate_config(config: Config) -> None:
     _positive(vehicle, "standard_gravity_m_s2")
     _positive(vehicle, "moment_of_inertia_kg_m2")
     _positive(vehicle, "engine_lever_arm_m")
-    _positive(vehicle, "gimbal_limit_deg")
+    gimbal_limit = _positive(vehicle, "gimbal_limit_deg")
     if initial_mass < dry_mass:
         raise ConfigError("vehicle.initial_mass_kg must be at or above dry_mass_kg")
+    if gimbal_limit > 90.0:
+        raise ConfigError("vehicle.gimbal_limit_deg cannot exceed 90")
 
-    throttle_min = vehicle.get("throttle_min")
-    throttle_max = vehicle.get("throttle_max")
-    if not isinstance(throttle_min, int | float) or not isinstance(throttle_max, int | float):
-        raise ConfigError("vehicle throttle bounds must be numeric")
+    throttle_min = _finite(vehicle, "throttle_min")
+    throttle_max = _finite(vehicle, "throttle_max")
     if not 0 <= throttle_min < throttle_max <= 1:
         raise ConfigError("vehicle throttle bounds must satisfy 0 <= min < max <= 1")
 
@@ -94,7 +100,10 @@ def validate_config(config: Config) -> None:
         missing = sorted(required_initial_state - set(initial_state))
         extra = sorted(set(initial_state) - required_initial_state)
         raise ConfigError(f"initial_state keys mismatch; missing={missing}, extra={extra}")
-    if initial_state["mass_kg"] < dry_mass:
+    initial_values = {key: _finite(initial_state, key) for key in required_initial_state}
+    if initial_values["z_m"] < ground:
+        raise ConfigError("initial_state.z_m must be at or above simulation.ground_z_m")
+    if initial_values["mass_kg"] < dry_mass:
         raise ConfigError("initial_state.mass_kg must be at or above vehicle.dry_mass_kg")
 
     for key in (
@@ -105,6 +114,12 @@ def validate_config(config: Config) -> None:
         "max_abs_omega_deg_s",
     ):
         _positive(landing, key)
+    for key in (
+        "require_mass_at_or_above_dry_mass",
+        "evaluate_immediately_before_ground_contact",
+    ):
+        if landing.get(key) is not True:
+            raise ConfigError(f"landing_success.{key} must be true")
 
 
 def load_config(path: str | Path) -> Config:
