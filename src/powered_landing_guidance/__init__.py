@@ -1,6 +1,13 @@
 """Powered-landing guidance research package."""
 
 from powered_landing_guidance.config import ConfigError, load_config, validate_config
+from powered_landing_guidance.controllers import (
+    SuicideBurnController,
+    SuicideBurnEstimate,
+    classify_ignition_timing,
+    estimate_suicide_burn,
+    estimate_variable_mass_suicide_burn,
+)
 from powered_landing_guidance.model import (
     ACTION_NAMES,
     ACTION_UNITS,
@@ -18,6 +25,11 @@ __all__ = [
     "ConfigError",
     "Control",
     "State",
+    "SuicideBurnController",
+    "SuicideBurnEstimate",
+    "classify_ignition_timing",
+    "estimate_suicide_burn",
+    "estimate_variable_mass_suicide_burn",
     "load_config",
     "validate_config",
 ]

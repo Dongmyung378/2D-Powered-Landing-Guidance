@@ -217,3 +217,22 @@ API 참고: [Gymnasium Env](https://gymnasium.farama.org/api/env/), [환경 검�
 `save_episode_data`는 같은 에피소드 기록을 JSON 또는 압축 NPZ로 저장합니다. NPZ에는 원본 JSON과 검증용 `times_s`, `states`, `actions`, `thrust_n` 배열을 함께 저장하며 객체 pickle은 사용하지 않습니다. `actions`는 각 step에 적용한 명령이고 나머지 배열은 초기 프레임을 포함합니다. `load_episode_data`는 배열과 원본 기록의 일치 여부를 확인합니다. 두 형식 모두 저장된 상태를 직접 읽으므로 물리 모델을 다시 실행하지 않습니다.
 
 시계열 그래프는 위치, 속도, 자세·각속도, 질량, throttle, gimbal을 표시합니다. 2D 애니메이션은 x-z 궤적, 로켓 자세, 추력 벡터, 지면과 x=0 착륙 목표를 표시합니다. 로켓 도형은 부호 확인용이며 실제 크기나 착륙 다리 형상을 나타내지 않습니다. GIF는 기본 지원하고 MP4는 FFmpeg가 있을 때 지원합니다. 출력 파일은 기존 파일을 덮어쓰지 않습니다.
+
+## 수직 Suicide burn 기준선
+
+8일차 기준 제어기는 수평 위치와 자세 오차가 없는 수직 하강만 다룹니다. 첫 번째 점화 고도 계산은 연소 중 질량을 현재 질량으로 고정합니다.
+
+~~~text
+net_deceleration = max_thrust / mass - gravity
+stopping_distance = (downward_speed^2 - target_speed^2) / (2 * net_deceleration)
+~~~
+
+estimate_suicide_burn은 이 상수 질량 계산을 그대로 제공합니다. 실제 SuicideBurnController는 연료 소모에 따라 질량과 가속도가 변하는 수직 운동 해석해로 점화 고도를 보정합니다. 필요한 속도 감소에 비해 연료가 부족하거나 최대 추력이 중력을 이기지 못하면 infeasible로 판정하고 즉시 최대 추력을 명령합니다.
+
+이상적인 점화가 0.02초 제어 주기 안에 있으면 첫 연소 스텝의 스로틀 비율을 조정해 이산 시간 오차를 줄입니다. 점화 이후에는 최대 추력을 유지합니다. 실제 점화 고도가 계산값보다 높으면 early_burn, 낮으면 late_burn, 허용오차 안이면 on_time으로 분류합니다.
+
+~~~powershell
+python scripts/run_episode.py --initial-state 0 100 0 -20 0 0 1000 --controller suicide-burn
+~~~
+
+이 기준선은 바람, 수평 오차, 기체 기울기와 센서 또는 엔진 지연을 보정하지 않습니다. 접지 속도 2 m/s는 현재 환경의 성공 판정 한계이며 실제 구조 안전 속도가 아닙니다.

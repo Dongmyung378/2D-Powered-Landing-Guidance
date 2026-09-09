@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from powered_landing_guidance import load_config
+from powered_landing_guidance.controllers import SuicideBurnController
 from powered_landing_guidance.envs import RocketLandingEnv
 from powered_landing_guidance.visualization import (
     load_episode_data,
@@ -37,6 +38,11 @@ def main() -> None:
     )
     parser.add_argument("--throttle", type=float, default=0.0)
     parser.add_argument("--gimbal-deg", type=float, default=0.0)
+    parser.add_argument(
+        "--controller",
+        choices=("suicide-burn",),
+        help="상태에 따라 제어 명령을 계산하는 기준 제어기",
+    )
     parser.add_argument("--output", type=Path, help="에피소드를 JSON 또는 NPZ로 저장")
     parser.add_argument("--plot", type=Path, help="상태와 제어 기록을 PNG로 저장")
     parser.add_argument("--animation", type=Path, help="기록된 궤적을 GIF 또는 MP4로 저장")
@@ -51,9 +57,14 @@ def main() -> None:
         parser.error(f"출력 파일이 이미 존재합니다: {existing[0]}")
     if args.replay and (args.nominal or args.initial_state is not None):
         parser.error("--replay는 초기조건 옵션과 함께 사용할 수 없습니다")
-    if args.replay and (args.throttle != 0.0 or args.gimbal_deg != 0.0):
+    if args.replay and (
+        args.throttle != 0.0 or args.gimbal_deg != 0.0 or args.controller is not None
+    ):
         parser.error("--replay는 제어 명령 옵션과 함께 사용할 수 없습니다")
+    if args.controller and (args.throttle != 0.0 or args.gimbal_deg != 0.0):
+        parser.error("--controller는 고정 제어 명령과 함께 사용할 수 없습니다")
 
+    burn_controller = None
     if args.replay:
         episode = load_episode_data(args.replay)
         if episode["steps"]:
@@ -63,14 +74,20 @@ def main() -> None:
             state = np.asarray(episode["initial_state"], dtype=np.float64)
             info = {"outcome": "running", "time_s": 0.0, "fuel_used_kg": 0.0}
     else:
-        env = RocketLandingEnv(load_config(args.config))
+        config = load_config(args.config)
+        env = RocketLandingEnv(config)
         options = {"randomize": not args.nominal}
         if args.initial_state is not None:
             options["initial_state"] = args.initial_state
         try:
-            env.reset(seed=args.seed, options=options)
-            action = [args.throttle, np.deg2rad(args.gimbal_deg)]
+            state, _ = env.reset(seed=args.seed, options=options)
+            if args.controller == "suicide-burn":
+                burn_controller = SuicideBurnController.from_config(config)
+            fixed_action = [args.throttle, np.deg2rad(args.gimbal_deg)]
             while True:
+                action = (
+                    burn_controller.command(state) if burn_controller is not None else fixed_action
+                )
                 state, _, terminated, truncated, info = env.step(action)
                 if terminated or truncated:
                     break
@@ -83,6 +100,14 @@ def main() -> None:
         f"사용 연료={info['fuel_used_kg']:.6f} kg"
     )
     print(f"상태 [x, z, vx, vz, theta, omega, mass]: {state.tolist()}")
+    if burn_controller is not None:
+        if burn_controller.actual_ignition_height_m is None:
+            print("Suicide-burn 점화 없음")
+        else:
+            print(
+                f"Suicide-burn 점화 고도={burn_controller.actual_ignition_height_m:.6f} m, "
+                f"분류={burn_controller.ignition_timing}"
+            )
     if args.output:
         print(f"저장 완료: {save_episode_data(episode, args.output)}")
     if args.plot:
