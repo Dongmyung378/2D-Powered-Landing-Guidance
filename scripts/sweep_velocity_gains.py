@@ -1,4 +1,4 @@
-"""수직속도 PID 이득 조합을 같은 초기조건에서 비교한다."""
+"""Compare vertical-velocity PID gains on identical initial conditions."""
 
 from __future__ import annotations
 
@@ -132,13 +132,13 @@ def main() -> None:
     parser.add_argument("--kp", type=float, nargs="+")
     parser.add_argument("--ki", type=float, nargs="+")
     parser.add_argument("--kd", type=float, nargs="+")
-    parser.add_argument("--output", type=Path, help="결과를 새 JSON 파일로 저장")
+    parser.add_argument("--output", type=Path, help="save results to a new JSON file")
     args = parser.parse_args()
 
     if args.episodes <= 0:
-        parser.error("--episodes는 양수여야 합니다")
+        parser.error("--episodes must be positive")
     if args.output is not None and args.output.exists():
-        parser.error(f"출력 파일이 이미 존재합니다: {args.output}")
+        parser.error(f"output file already exists: {args.output}")
 
     config = load_config(args.config)
     sweep = config["vertical_velocity_controller"]["gain_sweep"]
@@ -170,7 +170,7 @@ def main() -> None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         with args.output.open("x", encoding="utf-8") as stream:
             json.dump(payload, stream, ensure_ascii=False, indent=2, allow_nan=False)
-        print(f"저장 완료: {args.output}")
+        print(f"saved: {args.output}")
 
 
 if __name__ == "__main__":

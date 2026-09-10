@@ -155,8 +155,9 @@ throttle = saturate(feed_forward + Kp * error + Ki * integral + Kd * error_rate)
 ## 저장소 구조
 
 ~~~text
+README.md / README.ko.md        영문 기본·한국어 프로젝트 소개
 configs/                        공용 실험 설정
-docs/                           모델과 인터페이스 명세
+docs/spec.md / docs/spec.ko.md  영문 기본·한국어 기술 명세
 scripts/                        재현 가능한 실험 실행 명령
 src/powered_landing_guidance/   물리, 환경, 제어기와 시각화
 tests/                          회귀, 경계 조건과 제어기 테스트
@@ -183,4 +184,4 @@ Git에 포함되는 저장소에는 소스 코드, 재현 가능한 설정, 기�
 - 지면 접촉은 착륙 다리와 구조 충격이 없는 점 모델입니다.
 - 성공 기준 2 m/s는 시뮬레이션 판정값이며 하드웨어 안전을 보증하지 않습니다.
 
-좌표계, 단위, 사건과 에피소드 기록 규약은 [모델과 환경 명세](docs/spec.md)에서 확인할 수 있습니다.
+좌표계, 단위, 사건과 에피소드 기록 규약은 [한국어 모델·환경 명세](docs/spec.ko.md)에서 확인할 수 있습니다. [영문 명세](docs/spec.md)도 함께 제공합니다.

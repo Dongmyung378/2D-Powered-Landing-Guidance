@@ -1,6 +1,6 @@
 # Powered Landing Guidance
 
-[한국어 README](README.ko.md)
+[Korean README](README.ko.md)
 
 A reproducible 2D reusable-rocket powered-landing project that progresses from rigid-body simulation to classical control, optimal-control teaching, imitation learning, and robustness evaluation.
 
@@ -155,8 +155,9 @@ The integral term is clamped and stops accumulating when its error would push an
 ## Repository structure
 
 ~~~text
+README.md / README.ko.md        English default and Korean project overview
 configs/                        Shared experiment configuration
-docs/                           Model and interface specification
+docs/spec.md / docs/spec.ko.md  English default and Korean technical specification
 scripts/                        Reproducible experiment entry points
 src/powered_landing_guidance/   Physics, environment, controllers, and visualization
 tests/                          Regression, boundary, and controller tests
@@ -183,4 +184,4 @@ The tracked repository contains only source code, reproducible configuration, te
 - Ground contact uses a point model without landing-leg or structural-impact dynamics.
 - The 2 m/s success threshold is a simulation criterion, not a hardware safety guarantee.
 
-See [the model and environment specification](docs/spec.md) for coordinate, unit, event, and episode-log rules.
+See [the model and environment specification](docs/spec.md) for coordinate, unit, event, and episode-log rules. A [Korean specification](docs/spec.ko.md) is also available.
