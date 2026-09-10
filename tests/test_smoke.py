@@ -43,6 +43,11 @@ def test_default_config_loads_and_uses_python_3127() -> None:
     assert config["conventions"]["z_positive"] == "up"
     assert config["landing_success"]["max_abs_x_m"] == 1.0
     assert config["landing_success"]["max_abs_vz_m_s"] == 2.0
+    assert config["vertical_velocity_controller"]["gains"] == {
+        "kp": 0.08,
+        "ki": 0.001,
+        "kd": 0.01,
+    }
 
 
 def test_config_rejects_initial_mass_below_dry_mass() -> None:
@@ -100,6 +105,24 @@ def test_config_rejects_non_finite_or_boolean_numbers(section, key, value) -> No
 def test_config_rejects_inconsistent_model_contract(section, key, value, message) -> None:
     config = deepcopy(plg.load_config(DEFAULT_CONFIG))
     config[section][key] = value
+    with pytest.raises(plg.ConfigError, match=message):
+        plg.validate_config(config)
+
+
+@pytest.mark.parametrize(
+    ("section", "key", "value", "message"),
+    [
+        ("profile", "deceleration_m_s2", 0.0, "deceleration_m_s2"),
+        ("gains", "kp", -0.01, "kp"),
+        ("anti_windup", "integral_limit_m", 0.0, "integral_limit_m"),
+        ("evaluation", "vertical_speed_m_s", [-20.0, 1.0], "vertical_speed_m_s"),
+        ("gain_sweep", "kd", [], "gain_sweep.kd"),
+    ],
+)
+def test_config_rejects_invalid_vertical_controller_settings(section, key, value, message) -> None:
+    config = deepcopy(plg.load_config(DEFAULT_CONFIG))
+    config["vertical_velocity_controller"][section][key] = value
+
     with pytest.raises(plg.ConfigError, match=message):
         plg.validate_config(config)
 

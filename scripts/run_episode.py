@@ -8,7 +8,10 @@ from pathlib import Path
 import numpy as np
 
 from powered_landing_guidance import load_config
-from powered_landing_guidance.controllers import SuicideBurnController
+from powered_landing_guidance.controllers import (
+    SuicideBurnController,
+    VerticalVelocityPIDController,
+)
 from powered_landing_guidance.envs import RocketLandingEnv
 from powered_landing_guidance.visualization import (
     load_episode_data,
@@ -40,7 +43,7 @@ def main() -> None:
     parser.add_argument("--gimbal-deg", type=float, default=0.0)
     parser.add_argument(
         "--controller",
-        choices=("suicide-burn",),
+        choices=("suicide-burn", "velocity-pid"),
         help="상태에 따라 제어 명령을 계산하는 기준 제어기",
     )
     parser.add_argument("--output", type=Path, help="에피소드를 JSON 또는 NPZ로 저장")
@@ -64,7 +67,7 @@ def main() -> None:
     if args.controller and (args.throttle != 0.0 or args.gimbal_deg != 0.0):
         parser.error("--controller는 고정 제어 명령과 함께 사용할 수 없습니다")
 
-    burn_controller = None
+    controller = None
     if args.replay:
         episode = load_episode_data(args.replay)
         if episode["steps"]:
@@ -82,12 +85,12 @@ def main() -> None:
         try:
             state, _ = env.reset(seed=args.seed, options=options)
             if args.controller == "suicide-burn":
-                burn_controller = SuicideBurnController.from_config(config)
+                controller = SuicideBurnController.from_config(config)
+            elif args.controller == "velocity-pid":
+                controller = VerticalVelocityPIDController.from_config(config)
             fixed_action = [args.throttle, np.deg2rad(args.gimbal_deg)]
             while True:
-                action = (
-                    burn_controller.command(state) if burn_controller is not None else fixed_action
-                )
+                action = controller.command(state) if controller is not None else fixed_action
                 state, _, terminated, truncated, info = env.step(action)
                 if terminated or truncated:
                     break
@@ -100,14 +103,19 @@ def main() -> None:
         f"사용 연료={info['fuel_used_kg']:.6f} kg"
     )
     print(f"상태 [x, z, vx, vz, theta, omega, mass]: {state.tolist()}")
-    if burn_controller is not None:
-        if burn_controller.actual_ignition_height_m is None:
+    if isinstance(controller, SuicideBurnController):
+        if controller.actual_ignition_height_m is None:
             print("Suicide-burn 점화 없음")
         else:
             print(
-                f"Suicide-burn 점화 고도={burn_controller.actual_ignition_height_m:.6f} m, "
-                f"분류={burn_controller.ignition_timing}"
+                f"Suicide-burn 점화 고도={controller.actual_ignition_height_m:.6f} m, "
+                f"분류={controller.ignition_timing}"
             )
+    elif isinstance(controller, VerticalVelocityPIDController):
+        print(
+            f"목표 수직속도={controller.target_vertical_speed_m_s:.6f} m/s, "
+            f"마지막 throttle={controller.throttle:.6f}, 포화={controller.saturated}"
+        )
     if args.output:
         print(f"저장 완료: {save_episode_data(episode, args.output)}")
     if args.plot:

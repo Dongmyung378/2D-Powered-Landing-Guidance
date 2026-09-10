@@ -4,6 +4,8 @@ from powered_landing_guidance.config import ConfigError, load_config, validate_c
 from powered_landing_guidance.controllers import (
     SuicideBurnController,
     SuicideBurnEstimate,
+    VerticalVelocityPIDController,
+    VerticalVelocityProfile,
     classify_ignition_timing,
     estimate_suicide_burn,
     estimate_variable_mass_suicide_burn,
@@ -27,6 +29,8 @@ __all__ = [
     "State",
     "SuicideBurnController",
     "SuicideBurnEstimate",
+    "VerticalVelocityPIDController",
+    "VerticalVelocityProfile",
     "classify_ignition_timing",
     "estimate_suicide_burn",
     "estimate_variable_mass_suicide_burn",

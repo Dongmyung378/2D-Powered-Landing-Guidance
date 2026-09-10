@@ -36,6 +36,28 @@ def _finite(mapping: Config, key: str) -> float:
     return float(value)
 
 
+def _nonnegative(mapping: Config, key: str) -> float:
+    value = _finite(mapping, key)
+    if value < 0:
+        raise ConfigError(f"'{key}' must be a nonnegative number")
+    return value
+
+
+def _range(mapping: Config, key: str) -> tuple[float, float]:
+    values = mapping.get(key)
+    if not isinstance(values, list | tuple) or len(values) != 2:
+        raise ConfigError(f"'{key}' must contain [low, high]")
+    low, high = values
+    if any(
+        isinstance(value, bool) or not isinstance(value, int | float) or not isfinite(value)
+        for value in values
+    ):
+        raise ConfigError(f"'{key}' bounds must be finite numbers")
+    if low > high:
+        raise ConfigError(f"'{key}' must satisfy low <= high")
+    return float(low), float(high)
+
+
 def validate_config(config: Config) -> None:
     """Check model conventions, physical parameters and initial-state fields."""
     project = _mapping(config, "project")
@@ -44,6 +66,7 @@ def validate_config(config: Config) -> None:
     vehicle = _mapping(config, "vehicle")
     initial_state = _mapping(config, "initial_state")
     landing = _mapping(config, "landing_success")
+    velocity_controller = _mapping(config, "vertical_velocity_controller")
 
     if str(project.get("python_version")) != "3.12.7":
         raise ConfigError("project.python_version must be '3.12.7'")
@@ -120,6 +143,45 @@ def validate_config(config: Config) -> None:
     ):
         if landing.get(key) is not True:
             raise ConfigError(f"landing_success.{key} must be true")
+
+    profile = _mapping(velocity_controller, "profile")
+    touchdown_speed = _positive(profile, "touchdown_speed_m_s")
+    max_descent_speed = _positive(profile, "max_descent_speed_m_s")
+    _positive(profile, "deceleration_m_s2")
+    if max_descent_speed < touchdown_speed:
+        raise ConfigError("profile.max_descent_speed_m_s must be at least touchdown_speed_m_s")
+
+    gains = _mapping(velocity_controller, "gains")
+    for key in ("kp", "ki", "kd"):
+        _nonnegative(gains, key)
+
+    anti_windup = _mapping(velocity_controller, "anti_windup")
+    _positive(anti_windup, "integral_limit_m")
+
+    evaluation = _mapping(velocity_controller, "evaluation")
+    altitude_range = _range(evaluation, "altitude_m")
+    vertical_speed_range = _range(evaluation, "vertical_speed_m_s")
+    mass_range = _range(evaluation, "mass_kg")
+    if altitude_range[0] < ground:
+        raise ConfigError("evaluation.altitude_m cannot extend below ground")
+    if vertical_speed_range[1] > 0:
+        raise ConfigError("evaluation.vertical_speed_m_s must contain descending speeds")
+    if mass_range[0] < dry_mass:
+        raise ConfigError("evaluation.mass_kg cannot extend below dry mass")
+
+    gain_sweep = _mapping(velocity_controller, "gain_sweep")
+    for key in ("kp", "ki", "kd"):
+        values = gain_sweep.get(key)
+        if not isinstance(values, list) or not values:
+            raise ConfigError(f"gain_sweep.{key} must be a nonempty list")
+        for value in values:
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int | float)
+                or not isfinite(value)
+                or value < 0
+            ):
+                raise ConfigError(f"gain_sweep.{key} must contain nonnegative finite numbers")
 
 
 def load_config(path: str | Path) -> Config:

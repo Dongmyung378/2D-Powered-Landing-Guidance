@@ -236,3 +236,32 @@ python scripts/run_episode.py --initial-state 0 100 0 -20 0 0 1000 --controller 
 ~~~
 
 이 기준선은 바람, 수평 오차, 기체 기울기와 센서 또는 엔진 지연을 보정하지 않습니다. 접지 속도 2 m/s는 현재 환경의 성공 판정 한계이며 실제 구조 안전 속도가 아닙니다.
+
+## 수직속도 PID 기준선
+
+9일차 제어기는 고도에 따른 목표 수직속도를 만들고 throttle PID로 추종합니다. 수평 위치, 수평 속도, 자세와 각속도가 0인 수직 하강 조건을 대상으로 합니다.
+
+~~~text
+speed_limit = sqrt(touchdown_speed^2 + 2 * profile_deceleration * altitude)
+target_vz = -min(max_descent_speed, speed_limit)
+error = target_vz - current_vz
+~~~
+
+기본 profile은 접지 목표속도 1 m/s, 최대 하강속도 30 m/s, 감속도 3 m/s²입니다. Profile의 감속도와 중력을 보상하는 feed-forward throttle에 PID 보정값을 더합니다.
+
+~~~text
+feed_forward = mass * (gravity + target_acceleration) / max_thrust
+raw_throttle = feed_forward + Kp * error + Ki * integral + Kd * error_rate
+throttle = clip(raw_throttle, throttle_min, throttle_max)
+~~~
+
+기본 이득은 Kp=0.08, Ki=0.001, Kd=0.01입니다. 적분 오차는 ±10 m로 제한합니다. 출력이 상한에서 포화되고 오차가 양수이거나, 하한에서 포화되고 오차가 음수이면 해당 스텝의 적분을 취소합니다. reset은 적분값, 이전 오차와 마지막 명령 정보를 모두 초기화합니다.
+
+평가 초기조건은 고도 80-120 m, 수직속도 -25~-15 m/s, 질량 950-1000 kg의 독립 균등분포입니다. 20260910 seed로 생성한 100개 조건에서 100회 모두 성공했으며 평균 접지 속도는 1.1010 m/s, 95백분위는 1.1938 m/s, 평균 연료 사용량은 37.4923 kg입니다.
+
+~~~powershell
+python scripts/run_episode.py --initial-state 0 100 0 -20 0 0 1000 --controller velocity-pid
+python scripts/sweep_velocity_gains.py --episodes 100 --seed 20260910
+~~~
+
+이 결과는 현재 설정 범위의 결정론적 수직·무풍 시뮬레이션에 한정됩니다. 수평 위치와 자세 제어는 10일차 범위이며 바람, 모델 오차, 센서 잡음과 구동기 지연은 이후 강건성 단계에서 평가합니다.

@@ -65,3 +65,23 @@ landing_success:
   max_abs_omega_deg_s: 5.0
   require_mass_at_or_above_dry_mass: true
   evaluate_immediately_before_ground_contact: true
+
+vertical_velocity_controller:
+  profile:
+    touchdown_speed_m_s: 1.0
+    max_descent_speed_m_s: 30.0
+    deceleration_m_s2: 3.0
+  gains:
+    kp: 0.08
+    ki: 0.001
+    kd: 0.01
+  anti_windup:
+    integral_limit_m: 10.0
+  evaluation:
+    altitude_m: [80.0, 120.0]
+    vertical_speed_m_s: [-25.0, -15.0]
+    mass_kg: [950.0, 1000.0]
+  gain_sweep:
+    kp: [0.04, 0.06, 0.08]
+    ki: [0.0, 0.001]
+    kd: [0.0, 0.01]

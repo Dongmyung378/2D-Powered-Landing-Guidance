@@ -8,14 +8,30 @@ A reproducible 2D reusable-rocket powered-landing project that progresses from r
 
 | Item | Current status |
 |---|---|
-| Roadmap | Day 8 of 49 completed |
+| Roadmap | Day 9 of 49 completed |
 | Model | Planar 3-DoF with variable mass |
 | State | x, z, vx, vz, theta, omega, mass |
 | Action | throttle, gimbal angle |
-| Current controller | Vertical suicide-burn baseline |
+| Current controllers | Suicide-burn and vertical-velocity PID |
 | Runtime | Python 3.12.7 |
 
-The repository currently provides a tested simulation environment and the first non-learning landing baseline. PID, optimal control, Behavior Cloning, DAgger, disturbances, and Monte Carlo evaluation are scheduled for later roadmap stages.
+The repository currently provides a tested simulation environment and two non-learning vertical landing baselines. Horizontal and attitude control, optimal control, Behavior Cloning, DAgger, disturbances, and Monte Carlo evaluation are scheduled for later roadmap stages.
+
+## Day 9 result
+
+The vertical-velocity controller follows an altitude-dependent descent profile with throttle PID control. Gravity and the profile's nominal deceleration provide feed-forward throttle; conditional integration and an integral bound prevent windup when the actuator reaches its 0 to 1 limits.
+
+The selected gains are `Kp=0.08`, `Ki=0.001`, and `Kd=0.01`. A fixed batch of 100 initial conditions was sampled from 80 to 120 m altitude, -25 to -15 m/s vertical speed, and 950 to 1000 kg mass. Horizontal position, horizontal velocity, attitude, and angular velocity were held at zero for this vertical-only milestone.
+
+| Metric | Result |
+|---|---:|
+| Safe landings | 100 / 100 |
+| Success rate | 100% |
+| Mean touchdown speed | 1.1010 m/s |
+| 95th-percentile touchdown speed | 1.1938 m/s |
+| Mean propellant use | 37.4923 kg |
+
+This exceeds the roadmap gate of 80% safe landings while keeping every sampled touchdown below the configured 2 m/s limit.
 
 ## Day 8 result
 
@@ -58,7 +74,15 @@ python --version
 python -m pip install -e ".[dev]"
 ~~~
 
-## Run the vertical landing baseline
+## Run the vertical landing controllers
+
+Run the Day 9 velocity-profile PID controller:
+
+~~~powershell
+python scripts/run_episode.py --initial-state 0 100 0 -20 0 0 1000 --controller velocity-pid
+~~~
+
+Run the Day 8 suicide-burn controller:
 
 ~~~powershell
 python scripts/run_episode.py --initial-state 0 100 0 -20 0 0 1000 --controller suicide-burn
@@ -69,13 +93,13 @@ The initial-state order is x z vx vz theta omega mass. Values use SI units; thet
 Save the episode, diagnostic plot, and animation:
 
 ~~~powershell
-python scripts/run_episode.py --initial-state 0 100 0 -20 0 0 1000 --controller suicide-burn --output artifacts/suicide-burn.json --plot artifacts/suicide-burn.png --animation artifacts/suicide-burn.gif
+python scripts/run_episode.py --initial-state 0 100 0 -20 0 0 1000 --controller velocity-pid --output artifacts/velocity-pid.json --plot artifacts/velocity-pid.png --animation artifacts/velocity-pid.gif
 ~~~
 
 Replay the saved record without simulation:
 
 ~~~powershell
-python scripts/run_episode.py --replay artifacts/suicide-burn.json --animation artifacts/replay.gif
+python scripts/run_episode.py --replay artifacts/velocity-pid.json --animation artifacts/replay.gif
 ~~~
 
 Generated artifacts are excluded from Git and are never overwritten automatically.
@@ -98,6 +122,14 @@ python scripts/verify_week1.py --episodes 100 --seed 20260907
 
 This gate checks coordinate and torque signs, fuel flow, five termination modes, finite states, monotonic mass, ground penetration, event time, and log consistency.
 
+Compare PID gains on identical sampled initial conditions:
+
+~~~powershell
+python scripts/sweep_velocity_gains.py --episodes 100 --seed 20260910
+~~~
+
+The sweep reports success rate, touchdown-speed statistics, and mean fuel use. Pass explicit `--kp`, `--ki`, and `--kd` lists to test a different grid.
+
 ## Suicide-burn calculation
 
 For the first reference estimate, mass is held constant during the burn:
@@ -108,6 +140,17 @@ h_stop = (downward_speed^2 - target_speed^2) / (2 * a_net)
 ~~~
 
 An ignition above the required height is classified as early_burn; ignition below it is late_burn. The executable baseline refines this estimate with the analytic variable-mass solution and a fractional transition command when the ideal ignition occurs between control updates.
+
+## Vertical-velocity profile
+
+The Day 9 reference decreases the permitted downward speed as altitude falls:
+
+~~~text
+target_vz = -min(max_descent_speed, sqrt(touchdown_speed^2 + 2 * deceleration * altitude))
+throttle = saturate(feed_forward + Kp * error + Ki * integral + Kd * error_rate)
+~~~
+
+The integral term is clamped and stops accumulating when its error would push an already saturated command farther outside the actuator range.
 
 ## Repository structure
 
@@ -135,7 +178,7 @@ The tracked repository contains only source code, reproducible configuration, te
 ## Current limitations
 
 - Terminal powered descent only; launch, ascent, boost-back, and reentry are out of scope.
-- The suicide-burn controller is vertical-only and does not correct horizontal position or attitude.
+- The current controllers are vertical-only and do not correct horizontal position or attitude.
 - Aerodynamic drag, wind, sensor noise, thrust error, and engine delay are not active yet.
 - Ground contact uses a point model without landing-leg or structural-impact dynamics.
 - The 2 m/s success threshold is a simulation criterion, not a hardware safety guarantee.

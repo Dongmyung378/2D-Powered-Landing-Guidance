@@ -11,6 +11,8 @@ import pytest
 from powered_landing_guidance import load_config
 from powered_landing_guidance.controllers import (
     SuicideBurnController,
+    VerticalVelocityPIDController,
+    VerticalVelocityProfile,
     classify_ignition_timing,
     estimate_suicide_burn,
     estimate_variable_mass_suicide_burn,
@@ -18,9 +20,54 @@ from powered_landing_guidance.controllers import (
 from powered_landing_guidance.dynamics import PlanarDynamicsParameters, simulate_planar
 from powered_landing_guidance.envs import RocketLandingEnv
 from powered_landing_guidance.model import State
+from scripts.sweep_velocity_gains import evaluate_gains, sample_vertical_initial_states
 
 CONFIG = load_config(Path(__file__).resolve().parents[1] / "configs/default.yaml")
 PARAMETERS = PlanarDynamicsParameters.from_config(CONFIG)
+
+
+def test_vertical_velocity_profile_slows_descent_near_ground() -> None:
+    profile = VerticalVelocityProfile(
+        touchdown_speed_m_s=1.0,
+        max_descent_speed_m_s=30.0,
+        deceleration_m_s2=3.0,
+    )
+
+    assert profile.target_velocity_m_s(0.0) == pytest.approx(-1.0)
+    assert profile.target_velocity_m_s(50.0) < profile.target_velocity_m_s(10.0)
+    assert profile.target_velocity_m_s(1000.0) == pytest.approx(-30.0)
+    assert profile.target_acceleration_m_s2(10.0) == pytest.approx(3.0)
+    assert profile.target_acceleration_m_s2(1000.0) == pytest.approx(0.0)
+
+
+def test_velocity_pid_freezes_integrator_when_throttle_saturates() -> None:
+    controller = VerticalVelocityPIDController.from_config(CONFIG, kp=1.0, ki=1.0, kd=0.0)
+    too_fast = State(0.0, 1.0, 0.0, -50.0, 0.0, 0.0, 1000.0)
+    too_slow = State(0.0, 100.0, 0.0, 10.0, 0.0, 0.0, 1000.0)
+
+    np.testing.assert_array_equal(controller.command(too_fast), [1.0, 0.0])
+    assert controller.saturated
+    assert controller.integral_error_m == 0.0
+
+    controller.reset()
+    np.testing.assert_array_equal(controller.command(too_slow), [0.0, 0.0])
+    assert controller.saturated
+    assert controller.integral_error_m == 0.0
+
+
+def test_velocity_pid_reset_clears_accumulated_state() -> None:
+    controller = VerticalVelocityPIDController.from_config(CONFIG)
+    state = State(0.0, 100.0, 0.0, -20.0, 0.0, 0.0, 1000.0)
+
+    action = controller.command(state)
+    assert 0.0 <= action[0] <= 1.0
+    assert controller.previous_error_m_s is not None
+    assert controller.target_vertical_speed_m_s is not None
+
+    controller.reset()
+    assert controller.integral_error_m == 0.0
+    assert controller.previous_error_m_s is None
+    assert controller.target_vertical_speed_m_s is None
 
 
 def test_constant_mass_estimate_matches_closed_form_solution() -> None:
@@ -143,6 +190,32 @@ def test_controller_keeps_engine_on_after_ignition() -> None:
     controller.reset()
     assert not controller.ignited
     assert controller.ignition_timing is None
+
+
+def test_vertical_evaluation_states_are_reproducible_and_vertical_only() -> None:
+    first = sample_vertical_initial_states(CONFIG, episodes=12, seed=20260910)
+    second = sample_vertical_initial_states(CONFIG, episodes=12, seed=20260910)
+    ranges = CONFIG["vertical_velocity_controller"]["evaluation"]
+
+    np.testing.assert_array_equal(first, second)
+    np.testing.assert_array_equal(first[:, [0, 2, 4, 5]], 0.0)
+    assert np.all(ranges["altitude_m"][0] <= first[:, 1])
+    assert np.all(first[:, 1] <= ranges["altitude_m"][1])
+    assert np.all(ranges["vertical_speed_m_s"][0] <= first[:, 3])
+    assert np.all(first[:, 3] <= ranges["vertical_speed_m_s"][1])
+    assert np.all(ranges["mass_kg"][0] <= first[:, 6])
+    assert np.all(first[:, 6] <= ranges["mass_kg"][1])
+
+
+def test_selected_velocity_pid_gains_exceed_day9_success_gate() -> None:
+    states = sample_vertical_initial_states(CONFIG, episodes=20, seed=20260910)
+    gains = CONFIG["vertical_velocity_controller"]["gains"]
+
+    result = evaluate_gains(CONFIG, states, **gains)
+
+    assert result.success_rate >= 0.8
+    assert result.successes == result.episodes
+    assert result.p95_touchdown_speed_m_s <= CONFIG["landing_success"]["max_abs_vz_m_s"]
 
 
 @pytest.mark.parametrize(

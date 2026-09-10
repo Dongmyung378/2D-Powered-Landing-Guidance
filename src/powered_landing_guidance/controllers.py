@@ -40,6 +40,165 @@ def _nonnegative(value: float, name: str) -> float:
     return number
 
 
+def _positive(value: float, name: str) -> float:
+    number = _nonnegative(value, name)
+    if number == 0.0:
+        raise ValueError(f"{name} must be positive")
+    return number
+
+
+@dataclass(frozen=True, slots=True)
+class VerticalVelocityProfile:
+    """Altitude-dependent vertical-speed reference for terminal descent."""
+
+    touchdown_speed_m_s: float
+    max_descent_speed_m_s: float
+    deceleration_m_s2: float
+
+    def __post_init__(self) -> None:
+        touchdown = _positive(self.touchdown_speed_m_s, "touchdown_speed_m_s")
+        maximum = _positive(self.max_descent_speed_m_s, "max_descent_speed_m_s")
+        deceleration = _positive(self.deceleration_m_s2, "deceleration_m_s2")
+        if maximum < touchdown:
+            raise ValueError("max_descent_speed_m_s must be at least touchdown_speed_m_s")
+        object.__setattr__(self, "touchdown_speed_m_s", touchdown)
+        object.__setattr__(self, "max_descent_speed_m_s", maximum)
+        object.__setattr__(self, "deceleration_m_s2", deceleration)
+
+    def target_velocity_m_s(self, altitude_m: float) -> float:
+        """Return the downward reference velocity at an altitude above ground."""
+        altitude = _nonnegative(altitude_m, "altitude_m")
+        speed = np.sqrt(self.touchdown_speed_m_s**2 + 2.0 * self.deceleration_m_s2 * altitude)
+        return -min(self.max_descent_speed_m_s, float(speed))
+
+    def target_acceleration_m_s2(self, altitude_m: float) -> float:
+        """Return the feed-forward acceleration along the active profile branch."""
+        altitude = _nonnegative(altitude_m, "altitude_m")
+        unconstrained_speed = np.sqrt(
+            self.touchdown_speed_m_s**2 + 2.0 * self.deceleration_m_s2 * altitude
+        )
+        if unconstrained_speed >= self.max_descent_speed_m_s:
+            return 0.0
+        return self.deceleration_m_s2
+
+
+@dataclass(slots=True)
+class VerticalVelocityPIDController:
+    """Track a vertical-speed profile with feed-forward PID throttle control."""
+
+    parameters: PlanarDynamicsParameters
+    ground_z_m: float
+    control_interval_s: float
+    profile: VerticalVelocityProfile
+    kp: float
+    ki: float
+    kd: float
+    integral_limit_m: float
+    integral_error_m: float = field(init=False, default=0.0)
+    previous_error_m_s: float | None = field(init=False, default=None)
+    target_vertical_speed_m_s: float | None = field(init=False, default=None)
+    unsaturated_throttle: float | None = field(init=False, default=None)
+    throttle: float | None = field(init=False, default=None)
+    saturated: bool = field(init=False, default=False)
+
+    def __post_init__(self) -> None:
+        self.ground_z_m = float(self.ground_z_m)
+        if not np.isfinite(self.ground_z_m):
+            raise ValueError("ground_z_m must be finite")
+        self.control_interval_s = _positive(self.control_interval_s, "control_interval_s")
+        self.kp = _nonnegative(self.kp, "kp")
+        self.ki = _nonnegative(self.ki, "ki")
+        self.kd = _nonnegative(self.kd, "kd")
+        self.integral_limit_m = _positive(self.integral_limit_m, "integral_limit_m")
+
+    @classmethod
+    def from_config(
+        cls,
+        config: dict[str, Any],
+        *,
+        kp: float | None = None,
+        ki: float | None = None,
+        kd: float | None = None,
+    ) -> VerticalVelocityPIDController:
+        """Build the controller, optionally overriding gains for a sweep."""
+        settings = config["vertical_velocity_controller"]
+        profile = settings["profile"]
+        gains = settings["gains"]
+        return cls(
+            parameters=PlanarDynamicsParameters.from_config(config),
+            ground_z_m=float(config["simulation"]["ground_z_m"]),
+            control_interval_s=float(config["simulation"]["dt_s"]),
+            profile=VerticalVelocityProfile(
+                touchdown_speed_m_s=float(profile["touchdown_speed_m_s"]),
+                max_descent_speed_m_s=float(profile["max_descent_speed_m_s"]),
+                deceleration_m_s2=float(profile["deceleration_m_s2"]),
+            ),
+            kp=float(gains["kp"] if kp is None else kp),
+            ki=float(gains["ki"] if ki is None else ki),
+            kd=float(gains["kd"] if kd is None else kd),
+            integral_limit_m=float(settings["anti_windup"]["integral_limit_m"]),
+        )
+
+    def reset(self) -> None:
+        """Clear state accumulated during the previous episode."""
+        self.integral_error_m = 0.0
+        self.previous_error_m_s = None
+        self.target_vertical_speed_m_s = None
+        self.unsaturated_throttle = None
+        self.throttle = None
+        self.saturated = False
+
+    def command(self, state: State | ArrayLike) -> NDArray[np.float64]:
+        """Return a saturated [throttle, gimbal] command and update PID state."""
+        current = state if isinstance(state, State) else State.from_array(state)
+        altitude = current.z - self.ground_z_m
+        if altitude < 0.0:
+            raise ValueError("state cannot be below ground")
+
+        target_velocity = self.profile.target_velocity_m_s(altitude)
+        error = target_velocity - current.vz
+        derivative = (
+            0.0
+            if self.previous_error_m_s is None
+            else (error - self.previous_error_m_s) / self.control_interval_s
+        )
+        candidate_integral = float(
+            np.clip(
+                self.integral_error_m + error * self.control_interval_s,
+                -self.integral_limit_m,
+                self.integral_limit_m,
+            )
+        )
+        target_acceleration = self.profile.target_acceleration_m_s2(altitude)
+        feed_forward = (
+            current.mass
+            * (self.parameters.gravity_m_s2 + target_acceleration)
+            / self.parameters.max_thrust_n
+        )
+
+        def raw_throttle(integral: float) -> float:
+            return feed_forward + self.kp * error + self.ki * integral + self.kd * derivative
+
+        unsaturated = raw_throttle(candidate_integral)
+        minimum = self.parameters.throttle_min
+        maximum = self.parameters.throttle_max
+        blocks_integration = (unsaturated > maximum and error > 0.0) or (
+            unsaturated < minimum and error < 0.0
+        )
+        if blocks_integration:
+            candidate_integral = self.integral_error_m
+            unsaturated = raw_throttle(candidate_integral)
+
+        throttle = float(np.clip(unsaturated, minimum, maximum))
+        self.integral_error_m = candidate_integral
+        self.previous_error_m_s = error
+        self.target_vertical_speed_m_s = target_velocity
+        self.unsaturated_throttle = float(unsaturated)
+        self.throttle = throttle
+        self.saturated = not np.isclose(throttle, unsaturated, rtol=0.0, atol=1e-12)
+        return np.asarray((throttle, 0.0), dtype=np.float64)
+
+
 def estimate_suicide_burn(
     state: State | ArrayLike,
     parameters: PlanarDynamicsParameters,
