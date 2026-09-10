@@ -8,7 +8,7 @@ A reproducible 2D reusable-rocket powered-landing project that progresses from r
 
 | Item | Current status |
 |---|---|
-| Roadmap | Day 9 of 49 completed |
+| Roadmap | Week 2 classical-control stage |
 | Model | Planar 3-DoF with variable mass |
 | State | x, z, vx, vz, theta, omega, mass |
 | Action | throttle, gimbal angle |
@@ -17,11 +17,11 @@ A reproducible 2D reusable-rocket powered-landing project that progresses from r
 
 The repository currently provides a tested simulation environment and two non-learning vertical landing baselines. Horizontal and attitude control, optimal control, Behavior Cloning, DAgger, disturbances, and Monte Carlo evaluation are scheduled for later roadmap stages.
 
-## Day 9 result
+## Vertical-velocity PID benchmark
 
 The vertical-velocity controller follows an altitude-dependent descent profile with throttle PID control. Gravity and the profile's nominal deceleration provide feed-forward throttle; conditional integration and an integral bound prevent windup when the actuator reaches its 0 to 1 limits.
 
-The selected gains are `Kp=0.08`, `Ki=0.001`, and `Kd=0.01`. A fixed batch of 100 initial conditions was sampled from 80 to 120 m altitude, -25 to -15 m/s vertical speed, and 950 to 1000 kg mass. Horizontal position, horizontal velocity, attitude, and angular velocity were held at zero for this vertical-only milestone.
+The selected gains are `Kp=0.08`, `Ki=0.001`, and `Kd=0.01`. A fixed batch of 100 initial conditions was sampled from 80 to 120 m altitude, -25 to -15 m/s vertical speed, and 950 to 1000 kg mass. Horizontal position, horizontal velocity, attitude, and angular velocity were held at zero for this vertical-only benchmark.
 
 | Metric | Result |
 |---|---:|
@@ -31,9 +31,9 @@ The selected gains are `Kp=0.08`, `Ki=0.001`, and `Kd=0.01`. A fixed batch of 10
 | 95th-percentile touchdown speed | 1.1938 m/s |
 | Mean propellant use | 37.4923 kg |
 
-This exceeds the roadmap gate of 80% safe landings while keeping every sampled touchdown below the configured 2 m/s limit.
+Every sampled touchdown stayed below the configured 2 m/s limit.
 
-## Day 8 result
+## Suicide-burn benchmark
 
 The suicide-burn controller calculates when a descending rocket must ignite to meet the configured 2 m/s touchdown-speed limit. The roadmap's constant-mass closed-form estimate is included as the reference calculation. The executable controller also accounts for propellant loss and compensates when ignition falls inside a 0.02-second control interval.
 
@@ -76,13 +76,13 @@ python -m pip install -e ".[dev]"
 
 ## Run the vertical landing controllers
 
-Run the Day 9 velocity-profile PID controller:
+Run the velocity-profile PID controller:
 
 ~~~powershell
 python scripts/run_episode.py --initial-state 0 100 0 -20 0 0 1000 --controller velocity-pid
 ~~~
 
-Run the Day 8 suicide-burn controller:
+Run the suicide-burn controller:
 
 ~~~powershell
 python scripts/run_episode.py --initial-state 0 100 0 -20 0 0 1000 --controller suicide-burn
@@ -143,7 +143,7 @@ An ignition above the required height is classified as early_burn; ignition belo
 
 ## Vertical-velocity profile
 
-The Day 9 reference decreases the permitted downward speed as altitude falls:
+The velocity reference decreases the permitted downward speed as altitude falls:
 
 ~~~text
 target_vz = -min(max_descent_speed, sqrt(touchdown_speed^2 + 2 * deceleration * altitude))

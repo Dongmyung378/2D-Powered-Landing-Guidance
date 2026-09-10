@@ -207,7 +207,7 @@ def test_vertical_evaluation_states_are_reproducible_and_vertical_only() -> None
     assert np.all(first[:, 6] <= ranges["mass_kg"][1])
 
 
-def test_selected_velocity_pid_gains_exceed_day9_success_gate() -> None:
+def test_selected_velocity_pid_gains_exceed_configured_success_gate() -> None:
     states = sample_vertical_initial_states(CONFIG, episodes=20, seed=20260910)
     gains = CONFIG["vertical_velocity_controller"]["gains"]
 

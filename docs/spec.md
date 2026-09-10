@@ -220,7 +220,7 @@ API 참고: [Gymnasium Env](https://gymnasium.farama.org/api/env/), [환경 검�
 
 ## 수직 Suicide burn 기준선
 
-8일차 기준 제어기는 수평 위치와 자세 오차가 없는 수직 하강만 다룹니다. 첫 번째 점화 고도 계산은 연소 중 질량을 현재 질량으로 고정합니다.
+SuicideBurnController는 수평 위치와 자세 오차가 없는 수직 하강만 다룹니다. 첫 번째 점화 고도 계산은 연소 중 질량을 현재 질량으로 고정합니다.
 
 ~~~text
 net_deceleration = max_thrust / mass - gravity
@@ -239,7 +239,7 @@ python scripts/run_episode.py --initial-state 0 100 0 -20 0 0 1000 --controller 
 
 ## 수직속도 PID 기준선
 
-9일차 제어기는 고도에 따른 목표 수직속도를 만들고 throttle PID로 추종합니다. 수평 위치, 수평 속도, 자세와 각속도가 0인 수직 하강 조건을 대상으로 합니다.
+VerticalVelocityPIDController는 고도에 따른 목표 수직속도를 만들고 throttle PID로 추종합니다. 수평 위치, 수평 속도, 자세와 각속도가 0인 수직 하강 조건을 대상으로 합니다.
 
 ~~~text
 speed_limit = sqrt(touchdown_speed^2 + 2 * profile_deceleration * altitude)
@@ -264,4 +264,4 @@ python scripts/run_episode.py --initial-state 0 100 0 -20 0 0 1000 --controller 
 python scripts/sweep_velocity_gains.py --episodes 100 --seed 20260910
 ~~~
 
-이 결과는 현재 설정 범위의 결정론적 수직·무풍 시뮬레이션에 한정됩니다. 수평 위치와 자세 제어는 10일차 범위이며 바람, 모델 오차, 센서 잡음과 구동기 지연은 이후 강건성 단계에서 평가합니다.
+이 결과는 현재 설정 범위의 결정론적 수직·무풍 시뮬레이션에 한정됩니다. 수평 위치와 자세 제어는 현재 범위 밖이며 바람, 모델 오차, 센서 잡음과 구동기 지연은 이후 강건성 단계에서 평가합니다.
