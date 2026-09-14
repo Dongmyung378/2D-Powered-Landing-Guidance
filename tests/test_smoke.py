@@ -226,6 +226,29 @@ def test_config_rejects_tuning_data_leakage_and_empty_secondary_objective() -> N
         plg.validate_config(config)
 
 
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("episodes_per_level",), 0, "episodes_per_level"),
+        (("collapse_success_rate",), 1.1, "collapse_success_rate"),
+        (("constant_wind_m_s",), [1.0, 2.0], "constant_wind_m_s"),
+        (("gust", "amplitude_m_s"), [0.0, 0.0], "amplitude_m_s"),
+        (("sensor_noise", "scales"), [0.0, -1.0], "scales"),
+        (("thrust_scale",), [1.0, 1.0], "thrust_scale"),
+        (("engine_lag_s",), [0.1, 0.2], "engine_lag_s"),
+    ],
+)
+def test_config_rejects_invalid_disturbance_settings(path, value, message) -> None:
+    config = deepcopy(plg.load_config(DEFAULT_CONFIG))
+    target = config["disturbance_evaluation"]
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+
+    with pytest.raises(plg.ConfigError, match=message):
+        plg.validate_config(config)
+
+
 def test_week1_sanity_and_termination_verification() -> None:
     from scripts.verify_week1 import verify_model_sanity, verify_termination_cases
 

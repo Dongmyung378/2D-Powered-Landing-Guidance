@@ -15,7 +15,7 @@ A reproducible 2D reusable-rocket powered-landing project that progresses from r
 | Current controllers | Suicide-burn, vertical PID, horizontal-attitude, and integrated landing |
 | Runtime | Python 3.12.7 |
 
-The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, an integrated PID landing controller, and reproducible baseline tuning. Optimal control, Behavior Cloning, DAgger, disturbances, and Monte Carlo evaluation remain later roadmap stages.
+The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, an integrated PID landing controller, reproducible baseline tuning, and isolated-disturbance evaluation. Optimal control, Behavior Cloning, DAgger, combined uncertainty, and large-scale Monte Carlo evaluation remain later roadmap stages.
 
 ## Integrated landing benchmark
 
@@ -49,6 +49,20 @@ score = 1000 * failure_rate + 5 * fuel_fraction + 10 * normalized_landing_error
 The selected scales were 1.10 for horizontal position gain, 0.95 for horizontal velocity gain, and 1.10 for descent-profile deceleration. On the training batch, this candidate and the unscaled reference both landed 16 of 16 cases; the selected candidate reduced the score from 4.179125 to 3.716630 and mean propellant use from 52.9862 kg to 51.1532 kg. On the untouched validation batch it landed 100 of 100 cases, with 51.9394 kg mean propellant use and 0.3942 m mean absolute position error.
 
 The generated report records every candidate, objective term, seed, and validation metric. The generated YAML is a complete loadable configuration. The tracked default remains the fixed tuning reference, while generated tuning outputs stay outside Git.
+
+## Isolated-disturbance benchmark
+
+The tuned integrated PID was evaluated against one disturbance at a time using 30 paired initial conditions from seed 20260915. The test covers quadratic aerodynamic response to constant wind and a two-second half-sine gust, independent Gaussian sensor noise, actual thrust-scale error, and first-order throttle lag. A curve is marked as collapsed at the first tested strength below a 95% safe-landing rate.
+
+| Disturbance | Last tested strength at or above 95% | First tested collapse strength | Success at collapse |
+|---|---:|---:|---:|
+| Constant wind | 10 m/s | 20 m/s | 26 / 30 |
+| Gust amplitude | 40 m/s | 60 m/s | 26 / 30 |
+| Sensor-noise scale | 1x | 2x | 26 / 30 |
+| Actual thrust scale | 1.00x | 0.95x | 28 / 30 |
+| Throttle-lag time constant | 0.2 s | 0.5 s | 27 / 30 |
+
+The zero-disturbance batch landed 29 of 30 cases. This differs from the earlier 100-of-100 validation because it uses a new seed and exposes a boundary case; it is evidence that a finite successful batch does not prove universal robustness. Disturbance directions, gust start times, sensor-noise streams, and initial states are paired across strength levels, so each curve changes only one modeled factor. These thresholds describe the configured test grid, not certified operating limits.
 
 ## Horizontal-attitude control benchmark
 
@@ -217,6 +231,14 @@ python scripts/run_episode.py --config artifacts/best-integrated.yaml --initial-
 
 GIF rendering is completed after the simulation and can take several seconds. `--max-frames` controls rendering time and output size by downsampling the recorded trajectory; it does not alter the simulated physics.
 
+Generate the isolated-disturbance report and performance curves:
+
+~~~powershell
+python scripts/evaluate_pid_disturbances.py --report artifacts/disturbances.json --plot artifacts/disturbances.png
+~~~
+
+Use `--episodes` to override the configured 30 trials per strength. Existing outputs are not overwritten.
+
 ## Suicide-burn calculation
 
 For the first reference estimate, mass is held constant during the burn:
@@ -279,8 +301,9 @@ The tracked repository contains only source code, reproducible configuration, te
 ## Current limitations
 
 - Terminal powered descent only; launch, ascent, boost-back, and reentry are out of scope.
-- The integrated controller is validated only in deterministic, wind-free simulation.
-- Aerodynamic drag, wind, sensor noise, thrust error, and engine delay are not active yet.
+- Disturbances are evaluated one at a time; coupled wind, sensing, and actuator failures are not covered yet.
+- Aerodynamic drag is a point-force model without aerodynamic torque, lift, altitude-varying density, or turbulence.
+- Sensor errors are independent zero-mean Gaussian samples, and engine lag currently affects throttle only.
 - Ground contact uses a point model without landing-leg or structural-impact dynamics.
 - The 2 m/s success threshold is a simulation criterion, not a hardware safety guarantee.
 

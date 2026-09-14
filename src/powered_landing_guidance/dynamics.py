@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,6 +20,7 @@ from powered_landing_guidance.integrators import (
 from powered_landing_guidance.model import Control, State
 
 type ControlInput = Control | ArrayLike
+type WindVelocityInput = ArrayLike | Callable[[float], ArrayLike] | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +37,9 @@ class PlanarDynamicsParameters:
     throttle_min: float
     throttle_max: float
     gimbal_limit_rad: float
+    air_density_kg_m3: float
+    drag_coefficient: float
+    reference_area_m2: float
 
     @property
     def mass_tolerance_kg(self) -> float:
@@ -51,6 +56,8 @@ class PlanarDynamicsParameters:
             self.moment_of_inertia_kg_m2,
             self.engine_lever_arm_m,
             self.gimbal_limit_rad,
+            self.air_density_kg_m3,
+            self.reference_area_m2,
         )
         if not all(np.isfinite(value) and value > 0 for value in positive_values):
             raise ValueError("all physical parameters and the gimbal limit must be positive")
@@ -60,12 +67,15 @@ class PlanarDynamicsParameters:
             raise ValueError("throttle limits must satisfy 0 <= min < max <= 1")
         if self.gimbal_limit_rad > np.pi / 2.0:
             raise ValueError("gimbal limit cannot exceed pi/2 radians")
+        if not np.isfinite(self.drag_coefficient) or self.drag_coefficient < 0.0:
+            raise ValueError("drag coefficient must be nonnegative and finite")
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> PlanarDynamicsParameters:
         """Construct parameters and convert the configured gimbal limit to radians."""
         simulation = config["simulation"]
         vehicle = config["vehicle"]
+        environment = config["environment"]
         return cls(
             gravity_m_s2=float(simulation["gravity_m_s2"]),
             max_thrust_n=float(vehicle["max_thrust_n"]),
@@ -77,6 +87,9 @@ class PlanarDynamicsParameters:
             throttle_min=float(vehicle["throttle_min"]),
             throttle_max=float(vehicle["throttle_max"]),
             gimbal_limit_rad=float(np.deg2rad(vehicle["gimbal_limit_deg"])),
+            air_density_kg_m3=float(environment["air_density_kg_m3"]),
+            drag_coefficient=float(vehicle["drag_coefficient"]),
+            reference_area_m2=float(vehicle["reference_area_m2"]),
         )
 
 
@@ -105,6 +118,41 @@ def clip_control(command: ControlInput, parameters: PlanarDynamicsParameters) ->
 def _validate_mass(state: State, parameters: PlanarDynamicsParameters) -> None:
     if state.mass < parameters.dry_mass_kg - parameters.mass_tolerance_kg:
         raise ValueError("state mass cannot be below dry mass")
+
+
+def _wind_velocity_at(
+    wind_velocity_m_s: WindVelocityInput,
+    time_s: float,
+) -> NDArray[np.float64] | None:
+    if wind_velocity_m_s is None:
+        return None
+    values = wind_velocity_m_s(time_s) if callable(wind_velocity_m_s) else wind_velocity_m_s
+    vector = np.asarray(values, dtype=np.float64)
+    if vector.shape != (2,):
+        raise ValueError(f"wind velocity must have shape (2,), got {vector.shape}")
+    if not np.all(np.isfinite(vector)):
+        raise ValueError("wind velocity must contain only finite values")
+    return vector
+
+
+def aerodynamic_drag_force_n(
+    state: State,
+    wind_velocity_m_s: ArrayLike,
+    parameters: PlanarDynamicsParameters,
+) -> NDArray[np.float64]:
+    """Return quadratic drag from vehicle velocity relative to the surrounding air."""
+    wind = _wind_velocity_at(wind_velocity_m_s, 0.0)
+    if wind is None:
+        raise ValueError("wind velocity is required for aerodynamic drag")
+    relative_velocity = np.asarray((state.vx, state.vz), dtype=np.float64) - wind
+    relative_speed = float(np.linalg.norm(relative_velocity))
+    dynamic_pressure_scale = (
+        0.5
+        * parameters.air_density_kg_m3
+        * parameters.drag_coefficient
+        * parameters.reference_area_m2
+    )
+    return -dynamic_pressure_scale * relative_speed * relative_velocity
 
 
 def _thrust_after_cutoff(
@@ -170,9 +218,15 @@ def translational_acceleration(
     state: State,
     command: ControlInput,
     parameters: PlanarDynamicsParameters,
+    *,
+    wind_velocity_m_s: WindVelocityInput = None,
 ) -> NDArray[np.float64]:
     """Return inertial ``[ax, az]`` using the state's current mass."""
-    acceleration = thrust_vector(state, command, parameters) / state.mass
+    force = thrust_vector(state, command, parameters)
+    wind = _wind_velocity_at(wind_velocity_m_s, 0.0)
+    if wind is not None:
+        force = force + aerodynamic_drag_force_n(state, wind, parameters)
+    acceleration = force / state.mass
     acceleration[1] -= parameters.gravity_m_s2
     return acceleration
 
@@ -191,9 +245,12 @@ def _derivative_from_thrust(
     control: Control,
     parameters: PlanarDynamicsParameters,
     thrust_n: float,
+    wind_velocity_m_s: NDArray[np.float64] | None = None,
 ) -> NDArray[np.float64]:
     direction_rad = state.theta + control.gimbal_angle
     force = thrust_n * np.asarray((np.sin(direction_rad), np.cos(direction_rad)))
+    if wind_velocity_m_s is not None:
+        force += aerodynamic_drag_force_n(state, wind_velocity_m_s, parameters)
     ax = force[0] / state.mass
     az = force[1] / state.mass - parameters.gravity_m_s2
     torque_nm = -parameters.engine_lever_arm_m * thrust_n * np.sin(control.gimbal_angle)
@@ -218,12 +275,15 @@ def state_derivative(
     state_vector: ArrayLike,
     command: ControlInput,
     parameters: PlanarDynamicsParameters,
+    *,
+    wind_velocity_m_s: WindVelocityInput = None,
 ) -> NDArray[np.float64]:
     """Return ``d/dt [x, z, vx, vz, theta, omega, mass]``."""
     state = State.from_array(state_vector)
     applied_control = clip_control(command, parameters)
     thrust_n = _thrust_after_cutoff(state, applied_control, parameters)
-    return _derivative_from_thrust(state, applied_control, parameters, thrust_n)
+    wind = _wind_velocity_at(wind_velocity_m_s, _time_s)
+    return _derivative_from_thrust(state, applied_control, parameters, thrust_n, wind)
 
 
 def simulate_planar(
@@ -234,6 +294,7 @@ def simulate_planar(
     dt_s: float,
     *,
     method: IntegrationMethod = "rk4",
+    wind_velocity_m_s: WindVelocityInput = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Simulate planar motion with exact dry-mass event splitting.
 
@@ -266,10 +327,24 @@ def simulate_planar(
 
     def powered_derivative(_time_s: float, vector: NDArray[np.float64]) -> NDArray[np.float64]:
         state = State.from_array(vector)
-        return _derivative_from_thrust(state, applied_control, parameters, nominal_thrust_n)
+        wind = _wind_velocity_at(wind_velocity_m_s, _time_s)
+        return _derivative_from_thrust(
+            state,
+            applied_control,
+            parameters,
+            nominal_thrust_n,
+            wind,
+        )
 
     def unpowered_derivative(_time_s: float, vector: NDArray[np.float64]) -> NDArray[np.float64]:
-        return _derivative_from_thrust(State.from_array(vector), applied_control, parameters, 0.0)
+        wind = _wind_velocity_at(wind_velocity_m_s, _time_s)
+        return _derivative_from_thrust(
+            State.from_array(vector),
+            applied_control,
+            parameters,
+            0.0,
+            wind,
+        )
 
     while times[-1] < duration_s - tolerance:
         step_start_s = times[-1]

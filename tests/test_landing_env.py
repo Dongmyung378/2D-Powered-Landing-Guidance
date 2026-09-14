@@ -134,6 +134,22 @@ def test_same_seed_reproduces_initial_state_trajectory_and_log():
     assert not np.array_equal(oa, continued)
 
 
+def test_time_varying_wind_receives_absolute_episode_time():
+    sampled_times = []
+
+    def wind(time_s):
+        sampled_times.append(time_s)
+        return [5.0, 0.0]
+
+    env = RocketLandingEnv(CONFIG, wind_velocity_m_s=wind)
+    env.reset(options={"initial_state": [0, 100, 0, 0, 0, 0, 900]})
+    env.step([0, 0])
+    env.step([0, 0])
+
+    assert min(sampled_times) == 0.0
+    assert max(sampled_times) > CONFIG["simulation"]["dt_s"]
+
+
 def test_sampling_bounds_and_degree_conversion():
     env = env_with()
     for seed in range(20):

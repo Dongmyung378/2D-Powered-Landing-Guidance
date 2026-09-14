@@ -20,6 +20,7 @@ from scipy.optimize import brentq, minimize_scalar
 from powered_landing_guidance.config import validate_config
 from powered_landing_guidance.dynamics import (
     PlanarDynamicsParameters,
+    WindVelocityInput,
     applied_thrust_n,
     clip_control,
     propellant_mass_flow_rate_kg_s,
@@ -47,7 +48,12 @@ class RocketLandingEnv(gym.Env):
 
     metadata = {"render_modes": []}
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(
+        self,
+        config: dict[str, Any],
+        *,
+        wind_velocity_m_s: WindVelocityInput = None,
+    ):
         super().__init__()
         self.config = deepcopy(config)
         validate_config(self.config)
@@ -59,6 +65,17 @@ class RocketLandingEnv(gym.Env):
         self.method = sim["integrator"]
         if self.method not in ("euler", "rk4"):
             raise ValueError("integrator must be euler or rk4")
+        configured_wind = _number(
+            self.config["environment"]["horizontal_wind_m_s"],
+            "horizontal_wind_m_s",
+        )
+        if wind_velocity_m_s is not None and configured_wind != 0.0:
+            raise ValueError("provide configured wind or a wind-velocity model, not both")
+        self._wind_velocity_m_s = (
+            np.asarray((configured_wind, 0.0), dtype=np.float64)
+            if wind_velocity_m_s is None and configured_wind != 0.0
+            else wind_velocity_m_s
+        )
         self._nominal = self._initial_vector(self.config["initial_state"])
         self._ranges = self._sampling_ranges(self.config.get("initial_state_sampling", {}))
         landing = self.config["landing_success"]
@@ -180,9 +197,17 @@ class RocketLandingEnv(gym.Env):
             return "hard_landing"
         return "crash"
 
-    def _advance(self, state, command, duration) -> NDArray[np.float64]:
+    def _advance(self, state, command, duration, start_time_s) -> NDArray[np.float64]:
         if duration <= 0.0:
             return state.copy()
+        wind_model = self._wind_velocity_m_s
+        if callable(wind_model):
+
+            def wind(elapsed_s):
+                return wind_model(start_time_s + elapsed_s)
+
+        else:
+            wind = wind_model
         result = simulate_planar(
             State.from_array(state),
             command,
@@ -190,10 +215,11 @@ class RocketLandingEnv(gym.Env):
             duration,
             duration,
             method=self.method,
+            wind_velocity_m_s=wind,
         )[1][-1]
         return State.from_array(result).as_array()
 
-    def _contact(self, state, command, duration, end):
+    def _contact(self, state, command, duration, end, start_time_s):
         """Locate first contact in a small integration interval.
 
         A conservative acceleration bound also checks a possible dip below ground
@@ -215,7 +241,7 @@ class RocketLandingEnv(gym.Env):
             if min(state[1], end[1]) - self.ground > max_accel * duration**2 / 8:
                 return None
             minimum = minimize_scalar(
-                lambda t: self._advance(state, command, t)[1],
+                lambda t: self._advance(state, command, t, start_time_s)[1],
                 bounds=(0.0, duration),
                 method="bounded",
                 options={"xatol": 1e-12},
@@ -224,12 +250,12 @@ class RocketLandingEnv(gym.Env):
                 return None
             bracket_end = float(minimum.x)
         contact_time = brentq(
-            lambda t: self._advance(state, command, t)[1] - self.ground,
+            lambda t: self._advance(state, command, t, start_time_s)[1] - self.ground,
             0.0,
             bracket_end,
             xtol=1e-12,
         )
-        contact_state = self._advance(state, command, contact_time)
+        contact_state = self._advance(state, command, contact_time, start_time_s)
         contact_state[1] = self.ground
         return contact_time, contact_state
 
@@ -254,8 +280,8 @@ class RocketLandingEnv(gym.Env):
             rate = propellant_mass_flow_rate_kg_s(current, command, self.parameters)
             fuel_time = (state[6] - self.parameters.dry_mass_kg) / rate if rate > 0 else np.inf
             h = min(h, fuel_time)
-            end = self._advance(state, command, h)
-            contact = self._contact(state, command, h, end)
+            end = self._advance(state, command, h, time)
+            contact = self._contact(state, command, h, end, time)
             if contact is not None:
                 delta, state = contact
                 time += delta

@@ -182,3 +182,29 @@ baseline_tuning:
     failure_penalty: 1000.0
     fuel_weight: 5.0
     landing_error_weight: 10.0
+
+disturbance_evaluation:
+  episodes_per_level: 30
+  seed: 20260915
+  collapse_success_rate: 0.95
+  controller_scales:
+    position_gain_scale: 1.1
+    velocity_gain_scale: 0.95
+    descent_profile_scale: 1.1
+  constant_wind_m_s: [0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
+  gust:
+    amplitude_m_s: [0.0, 20.0, 40.0, 60.0, 80.0, 100.0, 120.0, 160.0]
+    start_time_s: [2.0, 6.0]
+    duration_s: 2.0
+  sensor_noise:
+    scales: [0.0, 1.0, 2.0, 4.0, 8.0, 12.0, 16.0, 24.0]
+    standard_deviations:
+      x_m: 0.5
+      z_m: 0.5
+      vx_m_s: 0.1
+      vz_m_s: 0.1
+      theta_deg: 0.25
+      omega_deg_s: 0.25
+      mass_kg: 0.5
+  thrust_scale: [1.0, 0.95, 0.9, 0.85, 0.8, 0.7, 0.6, 0.5]
+  engine_lag_s: [0.0, 0.1, 0.2, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0]

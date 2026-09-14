@@ -11,8 +11,8 @@ This document defines the state, control, coordinate, unit, event, and episode-r
 - Rotational degree of freedom: `theta`
 - Variable vehicle mass: `mass`
 - Control inputs: throttle and thrust-vector gimbal angle
-- Implemented effects: gravity, thrust, propellant consumption, and point-position ground contact
-- Deferred effects: aerodynamic drag and wind
+- Implemented effects: gravity, thrust, propellant consumption, point-position ground contact, and optional quadratic aerodynamic drag with wind
+- Evaluation-only effects: Gaussian sensor noise, actual thrust-scale error, and first-order throttle lag
 - Fixed parameters: moment of inertia and engine lever arm
 
 ## 2. Inertial frame
@@ -355,3 +355,58 @@ python scripts/tune_integrated_controller.py --report artifacts/tuning.json --be
 ~~~
 
 The JSON report contains all candidate evaluations, objective components, seeds, and the independent validation result. The YAML output contains the complete selected configuration plus selection metadata and passes the same configuration validation as the tracked default. Existing output files are never overwritten.
+
+## 19. Isolated PID disturbance evaluation
+
+`evaluate_pid_disturbances.py` applies the selected Day 12 gain scales `(1.10, 0.95, 1.10)` and changes one disturbance model at a time. Every strength within a curve reuses the same 30 initial conditions from seed 20260915. Random wind direction, gust start time, and sensor-noise stream are also paired by episode across strength levels. Zero-strength results are required to match across all five curves.
+
+### 19.1 Wind and aerodynamic drag
+
+Wind is expressed as a two-dimensional inertial air-velocity vector. With vehicle velocity `v` and air velocity `w`, the relative velocity and quadratic drag force are:
+
+~~~text
+v_relative = v - w
+F_drag = -0.5 * air_density * drag_coefficient * reference_area
+         * norm(v_relative) * v_relative
+~~~
+
+The force acts through the modeled center of mass and therefore produces no aerodynamic torque. It is evaluated at each RK4 stage. Passing no wind model preserves the earlier ideal dynamics exactly and applies no aerodynamic force.
+
+A constant-wind episode holds its sampled positive or negative horizontal direction for the entire flight. A gust is a horizontal half-sine pulse with a two-second duration, a start time sampled uniformly from 2 to 6 seconds, and a direction sampled independently for each episode. The same direction and start time are reused when comparing amplitudes.
+
+### 19.2 Sensor noise
+
+Sensor noise is added only to the state observed by the controller; contact detection and physical propagation use the true state. Independent zero-mean Gaussian samples use the following one-times standard deviations: x and z `0.5 m`, vx and vz `0.1 m/s`, attitude and angular rate `0.25 deg` and `0.25 deg/s`, and mass `0.5 kg`. A dimensionless strength multiplies all seven values. Noisy altitude and mass are clipped at ground and dry mass so the observation remains inside the controller's physical domain.
+
+### 19.3 Thrust error and engine lag
+
+Thrust scale changes the simulator's actual maximum thrust while the controller retains its nominal model. Propellant flow uses the actual thrust and the unchanged specific impulse. A scale of `0.95` therefore means that every throttle setting produces 95% of the thrust expected by the controller.
+
+Engine lag is a first-order throttle response integrated exactly over each 0.02-second simulation interval:
+
+~~~text
+response = 1 - exp(-dt / time_constant)
+actual_throttle += response * (commanded_throttle - actual_throttle)
+~~~
+
+The initial actual throttle is zero. Gimbal remains immediate because gimbal-servo dynamics are not part of this disturbance. A zero time constant reproduces the command exactly.
+
+### 19.4 Performance curves and collapse rule
+
+The first tested nonzero disturbance strength with a safe-landing rate below 95% is reported as the collapse point. With 30 episodes per level, each case changes the observed success rate by 3.33 percentage points. Results at the measured collapse points were:
+
+| Disturbance | Last passing strength | Collapse strength | Success rate | Outcomes at collapse |
+|---|---:|---:|---:|---|
+| Constant wind | 10 m/s | 20 m/s | 86.7% | 26 success, 4 crash |
+| Gust amplitude | 40 m/s | 60 m/s | 86.7% | 26 success, 4 crash |
+| Sensor-noise scale | 1x | 2x | 86.7% | 26 success, 4 crash |
+| Actual thrust scale | 1.00x | 0.95x | 93.3% | 28 success, 2 crash |
+| Throttle-lag time constant | 0.2 s | 0.5 s | 90.0% | 27 success, 3 crash |
+
+The shared zero-disturbance result was 29 safe landings and one crash. This new seed exposes a boundary case that was absent from the separate Day 12 validation batch. The values above are tested grid thresholds, not exact physical limits or hardware certifications.
+
+~~~powershell
+python scripts/evaluate_pid_disturbances.py --report artifacts/disturbances.json --plot artifacts/disturbances.png
+~~~
+
+The JSON contains every level's outcome counts, terminal-state errors, normalized error, and propellant use. The PNG contains five safe-landing-rate curves, the 95% threshold, and the detected collapse strength. Existing files are never overwritten.

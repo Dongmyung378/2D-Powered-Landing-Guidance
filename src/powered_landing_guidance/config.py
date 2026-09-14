@@ -82,12 +82,30 @@ def _positive_list(mapping: Config, key: str) -> list[float]:
     return result
 
 
+def _nonnegative_list(mapping: Config, key: str) -> list[float]:
+    values = mapping.get(key)
+    if not isinstance(values, list) or not values:
+        raise ConfigError(f"'{key}' must be a nonempty list")
+    result: list[float] = []
+    for value in values:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int | float)
+            or not isfinite(value)
+            or value < 0.0
+        ):
+            raise ConfigError(f"'{key}' must contain nonnegative finite numbers")
+        result.append(float(value))
+    return result
+
+
 def validate_config(config: Config) -> None:
     """Check model conventions, physical parameters and initial-state fields."""
     project = _mapping(config, "project")
     conventions = _mapping(config, "conventions")
     simulation = _mapping(config, "simulation")
     vehicle = _mapping(config, "vehicle")
+    environment = _mapping(config, "environment")
     initial_state = _mapping(config, "initial_state")
     landing = _mapping(config, "landing_success")
     velocity_controller = _mapping(config, "vertical_velocity_controller")
@@ -126,6 +144,8 @@ def validate_config(config: Config) -> None:
     _positive(vehicle, "standard_gravity_m_s2")
     _positive(vehicle, "moment_of_inertia_kg_m2")
     _positive(vehicle, "engine_lever_arm_m")
+    _nonnegative(vehicle, "drag_coefficient")
+    _positive(vehicle, "reference_area_m2")
     gimbal_limit = _positive(vehicle, "gimbal_limit_deg")
     if initial_mass < dry_mass:
         raise ConfigError("vehicle.initial_mass_kg must be at or above dry_mass_kg")
@@ -136,6 +156,9 @@ def validate_config(config: Config) -> None:
     throttle_max = _finite(vehicle, "throttle_max")
     if not 0 <= throttle_min < throttle_max <= 1:
         raise ConfigError("vehicle throttle bounds must satisfy 0 <= min < max <= 1")
+
+    _positive(environment, "air_density_kg_m3")
+    _finite(environment, "horizontal_wind_m_s")
 
     required_initial_state = {
         "x_m",
@@ -344,6 +367,91 @@ def validate_config(config: Config) -> None:
     _nonnegative(tuning_objective, "landing_error_weight")
     if tuning_objective["fuel_weight"] == 0.0 and tuning_objective["landing_error_weight"] == 0.0:
         raise ConfigError("baseline_tuning objective must weight fuel or landing error")
+
+    disturbance_settings = config.get("disturbance_evaluation")
+    if disturbance_settings is not None:
+        if not isinstance(disturbance_settings, dict):
+            raise ConfigError("'disturbance_evaluation' must be a mapping")
+        _positive_integer(disturbance_settings, "episodes_per_level")
+        disturbance_seed = disturbance_settings.get("seed")
+        if (
+            not isinstance(disturbance_seed, int)
+            or isinstance(disturbance_seed, bool)
+            or disturbance_seed < 0
+        ):
+            raise ConfigError("disturbance_evaluation seed must be a nonnegative integer")
+        collapse_rate = _positive(disturbance_settings, "collapse_success_rate")
+        if collapse_rate > 1.0:
+            raise ConfigError("collapse_success_rate cannot exceed 1")
+
+        controller_scales = _mapping(disturbance_settings, "controller_scales")
+        for key in scale_keys:
+            _positive(controller_scales, key)
+
+        constant_wind = _nonnegative_list(disturbance_settings, "constant_wind_m_s")
+        if (
+            len(constant_wind) < 2
+            or constant_wind[0] != 0.0
+            or any(
+                later <= earlier
+                for earlier, later in zip(constant_wind, constant_wind[1:], strict=False)
+            )
+        ):
+            raise ConfigError("constant_wind_m_s must start at 0 and increase")
+
+        gust = _mapping(disturbance_settings, "gust")
+        gust_amplitudes = _nonnegative_list(gust, "amplitude_m_s")
+        if (
+            len(gust_amplitudes) < 2
+            or gust_amplitudes[0] != 0.0
+            or any(
+                later <= earlier
+                for earlier, later in zip(gust_amplitudes, gust_amplitudes[1:], strict=False)
+            )
+        ):
+            raise ConfigError("gust amplitude_m_s must start at 0 and increase")
+        gust_start_range = _range(gust, "start_time_s")
+        if gust_start_range[0] < 0.0:
+            raise ConfigError("gust start_time_s must be nonnegative")
+        _positive(gust, "duration_s")
+
+        sensor_noise = _mapping(disturbance_settings, "sensor_noise")
+        noise_scales = _nonnegative_list(sensor_noise, "scales")
+        if (
+            len(noise_scales) < 2
+            or noise_scales[0] != 0.0
+            or any(
+                later <= earlier
+                for earlier, later in zip(noise_scales, noise_scales[1:], strict=False)
+            )
+        ):
+            raise ConfigError("sensor noise scales must start at 0 and increase")
+        noise_standard_deviations = _mapping(sensor_noise, "standard_deviations")
+        noise_keys = ("x_m", "z_m", "vx_m_s", "vz_m_s", "theta_deg", "omega_deg_s", "mass_kg")
+        noise_values = [_nonnegative(noise_standard_deviations, key) for key in noise_keys]
+        if not any(noise_values):
+            raise ConfigError("sensor noise must have a positive standard deviation")
+
+        thrust_scales = _positive_list(disturbance_settings, "thrust_scale")
+        if (
+            len(thrust_scales) < 2
+            or thrust_scales[0] != 1.0
+            or any(
+                later >= earlier
+                for earlier, later in zip(thrust_scales, thrust_scales[1:], strict=False)
+            )
+        ):
+            raise ConfigError("thrust_scale must start at 1 and decrease")
+
+        engine_lag = _nonnegative_list(disturbance_settings, "engine_lag_s")
+        if (
+            len(engine_lag) < 2
+            or engine_lag[0] != 0.0
+            or any(
+                later <= earlier for earlier, later in zip(engine_lag, engine_lag[1:], strict=False)
+            )
+        ):
+            raise ConfigError("engine_lag_s must start at 0 and increase")
 
 
 def load_config(path: str | Path) -> Config:

@@ -32,6 +32,13 @@ from scripts.evaluate_integrated_control import (
     evaluate_integrated_control,
     sample_integrated_initial_states,
 )
+from scripts.evaluate_pid_disturbances import (
+    DISTURBANCE_ORDER,
+    FirstOrderThrottleLag,
+    add_sensor_noise,
+    evaluate_disturbances,
+    save_disturbance_outputs,
+)
 from scripts.sweep_velocity_gains import evaluate_gains, sample_vertical_initial_states
 from scripts.tune_integrated_controller import (
     ScaleCandidate,
@@ -239,6 +246,77 @@ def test_tuning_uses_separate_batches_and_saves_loadable_best_config(tmp_path) -
         "descent_profile_scale": 1.0,
     }
     assert json.loads(report_path.read_text(encoding="utf-8"))["validation_episodes"] == 3
+
+
+def test_first_order_throttle_lag_keeps_gimbal_immediate() -> None:
+    actuator = FirstOrderThrottleLag(time_constant_s=0.2)
+    applied = actuator.apply([1.0, 0.1], dt_s=0.2)
+
+    assert applied[0] == pytest.approx(1.0 - np.exp(-1.0))
+    assert applied[1] == 0.1
+    np.testing.assert_array_equal(
+        FirstOrderThrottleLag(time_constant_s=0.0).apply([0.7, -0.2], dt_s=0.02),
+        [0.7, -0.2],
+    )
+
+
+def test_sensor_noise_is_seeded_and_does_not_mutate_true_state() -> None:
+    state = np.asarray([1.0, 2.0, 3.0, -4.0, 0.1, -0.2, 900.0])
+    deviations = np.ones(7)
+    before = state.copy()
+    first = add_sensor_noise(
+        state,
+        deviations,
+        1.0,
+        np.random.default_rng(7),
+        ground_z_m=0.0,
+        dry_mass_kg=750.0,
+    )
+    second = add_sensor_noise(
+        state,
+        deviations,
+        1.0,
+        np.random.default_rng(7),
+        ground_z_m=0.0,
+        dry_mass_kg=750.0,
+    )
+
+    np.testing.assert_array_equal(first, second)
+    np.testing.assert_array_equal(state, before)
+    np.testing.assert_array_equal(
+        add_sensor_noise(
+            state,
+            deviations,
+            0.0,
+            np.random.default_rng(8),
+            ground_z_m=0.0,
+            dry_mass_kg=750.0,
+        ),
+        state,
+    )
+
+
+def test_isolated_disturbance_sweep_saves_complete_curves(tmp_path) -> None:
+    config = deepcopy(CONFIG)
+    settings = config["disturbance_evaluation"]
+    settings["constant_wind_m_s"] = [0.0, 10.0]
+    settings["gust"]["amplitude_m_s"] = [0.0, 20.0]
+    settings["sensor_noise"]["scales"] = [0.0, 1.0]
+    settings["thrust_scale"] = [1.0, 0.9]
+    settings["engine_lag_s"] = [0.0, 0.1]
+    result = evaluate_disturbances(config, episodes_per_level=1)
+    repeated = evaluate_disturbances(config, episodes_per_level=1)
+    report = tmp_path / "disturbances.json"
+    plot = tmp_path / "disturbances.png"
+    save_disturbance_outputs(result, report_path=report, plot_path=plot)
+
+    assert tuple(curve.kind for curve in result.curves) == DISTURBANCE_ORDER
+    assert repeated == result
+    assert all(len(curve.levels) == 2 for curve in result.curves)
+    baselines = [curve.levels[0] for curve in result.curves]
+    assert all(level.success_rate == baselines[0].success_rate for level in baselines)
+    assert json.loads(report.read_text(encoding="utf-8"))["episodes_per_level"] == 1
+    assert plot.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def test_vertical_velocity_profile_slows_descent_near_ground() -> None:

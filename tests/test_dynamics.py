@@ -10,6 +10,7 @@ import pytest
 from powered_landing_guidance import Control, State, load_config
 from powered_landing_guidance.dynamics import (
     PlanarDynamicsParameters,
+    aerodynamic_drag_force_n,
     angular_acceleration_rad_s2,
     applied_thrust_n,
     clip_control,
@@ -109,6 +110,39 @@ def test_acceleration_uses_current_mass() -> None:
     light_acceleration = translational_acceleration(light, control, PARAMETERS)
 
     assert light_acceleration[1] > heavy_acceleration[1]
+
+
+def test_quadratic_drag_uses_velocity_relative_to_wind() -> None:
+    stationary = State(0.0, 100.0, 0.0, 0.0, 0.0, 0.0, 1000.0)
+    wind = np.asarray((10.0, 0.0))
+
+    force = aerodynamic_drag_force_n(stationary, wind, PARAMETERS)
+    expected = (
+        0.5
+        * PARAMETERS.air_density_kg_m3
+        * PARAMETERS.drag_coefficient
+        * PARAMETERS.reference_area_m2
+        * 10.0**2
+    )
+
+    np.testing.assert_allclose(force, [expected, 0.0], rtol=0.0, atol=1e-12)
+    matching_airflow = State(0.0, 100.0, 10.0, 0.0, 0.0, 0.0, 1000.0)
+    np.testing.assert_array_equal(aerodynamic_drag_force_n(matching_airflow, wind, PARAMETERS), 0.0)
+
+
+def test_wind_input_changes_translation_without_changing_default_dynamics() -> None:
+    state = State(0.0, 100.0, 0.0, 0.0, 0.0, 0.0, 1000.0)
+    calm = translational_acceleration(state, [0.0, 0.0], PARAMETERS)
+    windy = translational_acceleration(
+        state,
+        [0.0, 0.0],
+        PARAMETERS,
+        wind_velocity_m_s=[20.0, 0.0],
+    )
+
+    np.testing.assert_allclose(calm, [0.0, -PARAMETERS.gravity_m_s2], rtol=0.0, atol=1e-12)
+    assert windy[0] > 0.0
+    assert windy[1] == pytest.approx(calm[1])
 
 
 def test_mass_below_dry_mass_is_rejected() -> None:
