@@ -15,7 +15,7 @@
 | 현재 제어기 | Suicide-burn, 수직 PID, 수평·자세 제어, 통합 착륙 제어 |
 | 실행 환경 | Python 3.12.7 |
 
-현재 저장소에는 검증된 시뮬레이션 환경, 두 가지 비학습 수직 착륙 기준선, 수평 위치·자세 직렬 제어기와 통합 PID 착륙 제어기가 구현되어 있습니다. 최적제어, Behavior Cloning, DAgger, 외란과 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
+현재 저장소에는 검증된 시뮬레이션 환경, 두 가지 비학습 수직 착륙 기준선, 수평 위치·자세 직렬 제어기, 통합 PID 착륙 제어기와 재현 가능한 기준선 튜닝이 구현되어 있습니다. 최적제어, Behavior Cloning, DAgger, 외란과 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
 
 ## 통합 착륙 벤치마크
 
@@ -35,6 +35,20 @@
 | 최대 throttle / gimbal 변화율 | 초당 1.7784 / 초당 60.0000도 |
 
 모든 실험이 설정된 착륙 제한을 전부 만족했습니다. 이 결과는 결정론적 무풍 시뮬레이션 기준이며 강건성이나 실제 하드웨어 안전을 의미하지 않습니다.
+
+## 재현 가능한 기준선 튜닝
+
+통합 제어기는 Cartesian grid search와 seed를 고정한 random search를 모두 지원합니다. 기본 grid는 배율을 적용하지 않은 기준 후보를 포함해 13개 후보를 평가합니다. 후보 선택에는 seed 20260912의 초기조건 16개를 사용하고, 선택된 후보는 seed 20260913의 별도 초기조건 100개에서 한 번만 검증합니다. 검증 조건은 후보 선택에 사용하지 않습니다.
+
+최소화하는 목적함수는 실패율, 전체 250 kg 연료 대비 사용 비율, x·vx·vz·자세·각속도의 평균 정규화 접지 오차를 결합합니다.
+
+~~~text
+score = 1000 * failure_rate + 5 * fuel_fraction + 10 * normalized_landing_error
+~~~
+
+선택된 배율은 수평 위치 이득 1.10, 수평 속도 이득 0.95, 하강 profile 감속도 1.10입니다. 학습 조건에서 선택 후보와 배율을 적용하지 않은 기준 후보는 모두 16회 중 16회 성공했고, 선택 후보는 점수를 4.179125에서 3.716630으로, 평균 연료 사용량을 52.9862 kg에서 51.1532 kg으로 줄였습니다. 한 번도 선택에 사용하지 않은 검증 조건에서는 100회 모두 성공했고 평균 연료 사용량은 51.9394 kg, 평균 절대 위치 오차는 0.3942 m였습니다.
+
+생성되는 보고서에는 모든 후보, 목적함수 항, seed와 검증 지표가 기록됩니다. 생성 YAML은 그대로 불러올 수 있는 전체 설정입니다. Git에 포함된 기본 설정은 고정된 튜닝 기준으로 유지하고 생성 결과는 Git 밖에 둡니다.
 
 ## 수평·자세 제어 벤치마크
 
@@ -188,6 +202,20 @@ python scripts/evaluate_integrated_control.py --episodes 100 --seed 20260914
 ~~~
 
 모든 접지 상태값, 연료 사용량, phase별 제어 갱신 횟수와 실제 throttle·gimbal 변화율을 출력합니다.
+
+통합 기준선을 튜닝하고 전체 보고서와 최적 설정을 저장합니다.
+
+~~~powershell
+python scripts/tune_integrated_controller.py --report artifacts/tuning.json --best-config artifacts/best-integrated.yaml
+~~~
+
+Seed가 고정된 random search는 `--method random`을 추가해 실행합니다. 두 출력은 기존 파일을 자동으로 덮어쓰지 않습니다. 선택된 설정은 다른 실행 명령에서 바로 사용할 수 있습니다.
+
+~~~powershell
+python scripts/run_episode.py --config artifacts/best-integrated.yaml --initial-state 10 100 0 -20 0 0 1000 --controller integrated-pid --output artifacts/tuned-landing.json --plot artifacts/tuned-landing.png --animation artifacts/tuned-landing.gif --fps 20 --max-frames 240
+~~~
+
+GIF 렌더링은 시뮬레이션이 끝난 뒤 수행되므로 몇 초 이상 걸릴 수 있습니다. `--max-frames`는 기록된 궤적을 고르게 줄여 렌더링 시간과 파일 크기를 조절하며 물리 시뮬레이션 결과는 바꾸지 않습니다.
 
 ## Suicide-burn 계산
 

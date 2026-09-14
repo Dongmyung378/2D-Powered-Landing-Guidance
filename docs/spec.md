@@ -323,4 +323,35 @@ python scripts/evaluate_integrated_control.py --episodes 100 --seed 20260914
 python scripts/run_episode.py --initial-state 10 100 0 -20 0 0 1000 --controller integrated-pid
 ~~~
 
-This controller is a deterministic wind-free baseline. Disturbance rejection, uncertainty, sensor noise, actuator delay, gain optimization, and hardware safety remain outside this result.
+This controller is a deterministic wind-free baseline. Disturbance rejection, uncertainty, sensor noise, actuator delay, and hardware safety remain outside this result.
+
+## 18. Baseline tuning automation
+
+`tune_integrated_controller.py` searches three scale factors applied to both integrated-controller phases: horizontal position gain, horizontal velocity gain, and descent-profile deceleration. It supports a Cartesian `grid` search and a uniform seeded `random` search. Both methods always include the unscaled `(1, 1, 1)` reference. Scaling is performed on an isolated configuration copy, so the input configuration is not mutated.
+
+Each candidate is evaluated on the same training batch. Selection minimizes the following scalar objective:
+
+~~~text
+failure_rate = 1 - success_rate
+fuel_fraction = mean_fuel_used / (initial_mass - dry_mass)
+normalized_landing_error = mean(
+    mean_abs_x / x_limit,
+    mean_abs_vx / vx_limit,
+    mean_abs_vz / vz_limit,
+    mean_abs_theta / theta_limit,
+    mean_abs_omega / omega_limit,
+)
+score = 1000 * failure_rate + 5 * fuel_fraction + 10 * normalized_landing_error
+~~~
+
+The failure term dominates the two secondary terms, while normalized fuel and touchdown error make their scales explicit. Objective weights, search ranges, candidate count, episode counts, and seeds are configuration values. Invalid ranges, nonpositive counts, equal train and validation seeds, and an objective with neither secondary term are rejected during configuration loading.
+
+The default Cartesian grid contains 12 scale combinations and adds the unscaled reference for 13 total candidates. Training uses 16 initial conditions from seed 20260912. Only the training objective selects the winner. The winner is then evaluated once on 100 independently sampled initial conditions from seed 20260913.
+
+The selected scales were `(1.10, 0.95, 1.10)`. All 16 training cases landed safely; the objective was 3.716630 and mean propellant use was 51.1532 kg. The unscaled candidate also landed all 16 cases but scored 4.179125 and used 52.9862 kg. Independent validation produced 100 safe landings in 100 cases, 51.9394 kg mean propellant use, 0.3942 m mean absolute touchdown position, and 0.7802 m/s mean absolute vertical touchdown speed.
+
+~~~powershell
+python scripts/tune_integrated_controller.py --report artifacts/tuning.json --best-config artifacts/best-integrated.yaml
+~~~
+
+The JSON report contains all candidate evaluations, objective components, seeds, and the independent validation result. The YAML output contains the complete selected configuration plus selection metadata and passes the same configuration validation as the tracked default. Existing output files are never overwritten.

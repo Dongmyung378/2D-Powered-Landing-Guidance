@@ -58,6 +58,30 @@ def _range(mapping: Config, key: str) -> tuple[float, float]:
     return float(low), float(high)
 
 
+def _positive_integer(mapping: Config, key: str) -> int:
+    value = mapping.get(key)
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ConfigError(f"'{key}' must be a positive integer")
+    return value
+
+
+def _positive_list(mapping: Config, key: str) -> list[float]:
+    values = mapping.get(key)
+    if not isinstance(values, list) or not values:
+        raise ConfigError(f"'{key}' must be a nonempty list")
+    result: list[float] = []
+    for value in values:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int | float)
+            or not isfinite(value)
+            or value <= 0.0
+        ):
+            raise ConfigError(f"'{key}' must contain positive finite numbers")
+        result.append(float(value))
+    return result
+
+
 def validate_config(config: Config) -> None:
     """Check model conventions, physical parameters and initial-state fields."""
     project = _mapping(config, "project")
@@ -69,6 +93,7 @@ def validate_config(config: Config) -> None:
     velocity_controller = _mapping(config, "vertical_velocity_controller")
     horizontal_controller = _mapping(config, "horizontal_attitude_controller")
     integrated_controller = _mapping(config, "integrated_landing_controller")
+    baseline_tuning = _mapping(config, "baseline_tuning")
 
     if str(project.get("python_version")) != "3.12.7":
         raise ConfigError("project.python_version must be '3.12.7'")
@@ -286,6 +311,39 @@ def validate_config(config: Config) -> None:
         raise ConfigError("integrated evaluation theta_deg exceeds the configured phase tilt limit")
     if integrated_mass_range[0] < dry_mass:
         raise ConfigError("integrated evaluation mass_kg cannot extend below dry mass")
+
+    tuning_search = _mapping(baseline_tuning, "search")
+    if tuning_search.get("method") not in {"grid", "random"}:
+        raise ConfigError("baseline_tuning search method must be 'grid' or 'random'")
+    _positive_integer(tuning_search, "train_episodes")
+    _positive_integer(tuning_search, "validation_episodes")
+    _positive_integer(tuning_search, "random_candidates")
+    for key in ("train_seed", "validation_seed"):
+        value = tuning_search.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ConfigError(f"baseline_tuning '{key}' must be a nonnegative integer")
+    if tuning_search["train_seed"] == tuning_search["validation_seed"]:
+        raise ConfigError("baseline_tuning train and validation seeds must differ")
+
+    tuning_grid = _mapping(tuning_search, "grid")
+    tuning_random = _mapping(tuning_search, "random")
+    scale_keys = (
+        "position_gain_scale",
+        "velocity_gain_scale",
+        "descent_profile_scale",
+    )
+    for key in scale_keys:
+        _positive_list(tuning_grid, key)
+        random_range = _range(tuning_random, key)
+        if random_range[0] <= 0.0:
+            raise ConfigError(f"baseline_tuning random '{key}' must be positive")
+
+    tuning_objective = _mapping(baseline_tuning, "objective")
+    _positive(tuning_objective, "failure_penalty")
+    _nonnegative(tuning_objective, "fuel_weight")
+    _nonnegative(tuning_objective, "landing_error_weight")
+    if tuning_objective["fuel_weight"] == 0.0 and tuning_objective["landing_error_weight"] == 0.0:
+        raise ConfigError("baseline_tuning objective must weight fuel or landing error")
 
 
 def load_config(path: str | Path) -> Config:

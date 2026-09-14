@@ -161,3 +161,24 @@ integrated_landing_controller:
     theta_deg: [-5.0, 5.0]
     omega_deg_s: [-2.0, 2.0]
     mass_kg: [950.0, 1000.0]
+
+baseline_tuning:
+  search:
+    method: grid
+    train_episodes: 16
+    validation_episodes: 100
+    train_seed: 20260912
+    validation_seed: 20260913
+    random_candidates: 12
+    grid:
+      position_gain_scale: [0.9, 1.0, 1.1]
+      velocity_gain_scale: [0.95, 1.05]
+      descent_profile_scale: [1.0, 1.1]
+    random:
+      position_gain_scale: [0.9, 1.1]
+      velocity_gain_scale: [0.95, 1.05]
+      descent_profile_scale: [1.0, 1.1]
+  objective:
+    failure_penalty: 1000.0
+    fuel_weight: 5.0
+    landing_error_weight: 10.0

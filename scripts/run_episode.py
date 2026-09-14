@@ -53,7 +53,17 @@ def main() -> None:
     parser.add_argument("--plot", type=Path, help="save state and control histories as PNG")
     parser.add_argument("--animation", type=Path, help="save the trajectory as GIF or MP4")
     parser.add_argument("--fps", type=int, default=30)
+    parser.add_argument(
+        "--max-frames",
+        type=int,
+        default=300,
+        help="maximum animation frames after trajectory downsampling",
+    )
     args = parser.parse_args()
+    if args.fps <= 0:
+        parser.error("--fps must be positive")
+    if args.max_frames <= 0:
+        parser.error("--max-frames must be positive")
     outputs = [path for path in (args.output, args.plot, args.animation) if path]
     output_paths = [str(path.resolve()).casefold() for path in outputs]
     if len(output_paths) != len(set(output_paths)):
@@ -134,7 +144,13 @@ def main() -> None:
     if args.plot:
         print(f"saved: {save_time_series(episode, args.plot)}")
     if args.animation:
-        print(f"saved: {save_animation(episode, args.animation, fps=args.fps)}")
+        animation_path = save_animation(
+            episode,
+            args.animation,
+            fps=args.fps,
+            max_frames=args.max_frames,
+        )
+        print(f"saved: {animation_path}")
 
 
 if __name__ == "__main__":

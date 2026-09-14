@@ -325,4 +325,35 @@ python scripts/evaluate_integrated_control.py --episodes 100 --seed 20260914
 python scripts/run_episode.py --initial-state 10 100 0 -20 0 0 1000 --controller integrated-pid
 ~~~
 
-이 제어기는 결정론적 무풍 기준선입니다. 외란 대응, 불확실성, 센서 잡음, 구동기 지연, gain 최적화와 하드웨어 안전은 이번 결과의 범위 밖입니다.
+이 제어기는 결정론적 무풍 기준선입니다. 외란 대응, 불확실성, 센서 잡음, 구동기 지연과 하드웨어 안전은 이번 결과의 범위 밖입니다.
+
+## 기준선 튜닝 자동화
+
+`tune_integrated_controller.py`는 통합 제어기의 두 phase에 함께 적용할 세 배율을 탐색합니다. 탐색 대상은 수평 위치 이득, 수평 속도 이득과 하강 profile 감속도입니다. Cartesian `grid` search와 seed를 고정한 균등분포 `random` search를 지원하며, 두 방식 모두 배율을 적용하지 않은 `(1, 1, 1)` 기준 후보를 포함합니다. 후보 배율은 복사된 설정에 적용하므로 입력 설정은 변경되지 않습니다.
+
+모든 후보는 동일한 학습 조건 묶음에서 평가합니다. 다음 단일 목적함수를 최소화해 후보를 선택합니다.
+
+~~~text
+failure_rate = 1 - success_rate
+fuel_fraction = mean_fuel_used / (initial_mass - dry_mass)
+normalized_landing_error = mean(
+    mean_abs_x / x_limit,
+    mean_abs_vx / vx_limit,
+    mean_abs_vz / vz_limit,
+    mean_abs_theta / theta_limit,
+    mean_abs_omega / omega_limit,
+)
+score = 1000 * failure_rate + 5 * fuel_fraction + 10 * normalized_landing_error
+~~~
+
+실패 항이 두 보조 항보다 우선하며, 연료와 접지 오차를 정규화해 각 척도를 명시적으로 맞춥니다. 목적함수 가중치, 탐색 범위, 후보 수, 에피소드 수와 seed는 모두 설정에서 바꿀 수 있습니다. 잘못된 범위, 0 이하 실행 횟수, 같은 학습·검증 seed, 두 보조 항을 모두 사용하지 않는 목적함수는 설정을 읽을 때 거부합니다.
+
+기본 Cartesian grid는 배율 조합 12개에 기준 후보를 더해 총 13개를 평가합니다. 학습은 seed 20260912에서 표본화한 초기조건 16개만 사용합니다. 후보 선택은 학습 목적함수로만 수행하며, 선택된 후보는 seed 20260913에서 독립적으로 표본화한 초기조건 100개에서 한 번만 검증합니다.
+
+선택된 배율은 `(1.10, 0.95, 1.10)`입니다. 학습 조건 16개는 모두 안전하게 착륙했고 목적함수는 3.716630, 평균 연료 사용량은 51.1532 kg이었습니다. 기준 후보도 16개 모두 성공했지만 목적함수는 4.179125, 평균 연료 사용량은 52.9862 kg이었습니다. 독립 검증에서는 100회 중 100회 안전하게 착륙했고 평균 연료 사용량 51.9394 kg, 평균 절대 접지 위치 0.3942 m, 평균 절대 수직 접지 속도 0.7802 m/s를 기록했습니다.
+
+~~~powershell
+python scripts/tune_integrated_controller.py --report artifacts/tuning.json --best-config artifacts/best-integrated.yaml
+~~~
+
+JSON 보고서는 모든 후보의 평가 결과, 목적함수 항, seed와 독립 검증 결과를 포함합니다. YAML 출력은 선택 정보가 추가된 전체 설정이며 Git에 포함된 기본 설정과 같은 검증을 통과합니다. 기존 출력 파일은 덮어쓰지 않습니다.

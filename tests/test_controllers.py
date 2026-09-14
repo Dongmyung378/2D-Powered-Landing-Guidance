@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 
@@ -31,6 +33,14 @@ from scripts.evaluate_integrated_control import (
     sample_integrated_initial_states,
 )
 from scripts.sweep_velocity_gains import evaluate_gains, sample_vertical_initial_states
+from scripts.tune_integrated_controller import (
+    ScaleCandidate,
+    apply_candidate,
+    grid_candidates,
+    random_candidates,
+    save_tuning_outputs,
+    tune_controller,
+)
 
 CONFIG = load_config(Path(__file__).resolve().parents[1] / "configs/default.yaml")
 PARAMETERS = PlanarDynamicsParameters.from_config(CONFIG)
@@ -166,6 +176,69 @@ def test_integrated_evaluation_is_reproducible_and_lands_safely() -> None:
         result.max_gimbal_slew_deg_s
         <= CONFIG["integrated_landing_controller"]["slew_rates"]["gimbal_deg_s"] + 1e-10
     )
+
+
+def test_tuning_candidate_generation_is_reproducible() -> None:
+    grid = grid_candidates(CONFIG)
+    first_random = random_candidates(CONFIG, seed=20260912)
+    second_random = random_candidates(CONFIG, seed=20260912)
+
+    assert len(grid) == len(set(grid)) == 13
+    assert ScaleCandidate(1.0, 1.0, 1.0) in grid
+    assert first_random == second_random
+    assert first_random[0] == ScaleCandidate(1.0, 1.0, 1.0)
+
+
+def test_applying_tuning_candidate_does_not_mutate_source_config() -> None:
+    before = CONFIG["integrated_landing_controller"]["phases"]["approach"]["horizontal_outer_loop"][
+        "position_kp_s2"
+    ]
+    tuned = apply_candidate(CONFIG, ScaleCandidate(1.1, 0.95, 1.1))
+    after = tuned["integrated_landing_controller"]["phases"]["approach"]["horizontal_outer_loop"][
+        "position_kp_s2"
+    ]
+
+    assert (
+        CONFIG["integrated_landing_controller"]["phases"]["approach"]["horizontal_outer_loop"][
+            "position_kp_s2"
+        ]
+        == before
+    )
+    assert after == pytest.approx(before * 1.1)
+
+
+def test_tuning_uses_separate_batches_and_saves_loadable_best_config(tmp_path) -> None:
+    config = deepcopy(CONFIG)
+    grid = config["baseline_tuning"]["search"]["grid"]
+    grid["position_gain_scale"] = [1.0]
+    grid["velocity_gain_scale"] = [1.0]
+    grid["descent_profile_scale"] = [1.0]
+
+    result, best_config = tune_controller(
+        config,
+        method="grid",
+        train_episodes=2,
+        validation_episodes=3,
+    )
+    report_path = tmp_path / "tuning.json"
+    config_path = tmp_path / "best.yaml"
+    save_tuning_outputs(
+        result,
+        best_config,
+        report_path=report_path,
+        config_path=config_path,
+    )
+
+    assert result.train_seed != result.validation_seed
+    assert result.candidates_evaluated == len(result.train_results) == 1
+    assert result.best_train_result.evaluation.episodes == 2
+    assert result.validation_result.episodes == 3
+    assert load_config(config_path)["baseline_tuning"]["selected"]["candidate"] == {
+        "position_gain_scale": 1.0,
+        "velocity_gain_scale": 1.0,
+        "descent_profile_scale": 1.0,
+    }
+    assert json.loads(report_path.read_text(encoding="utf-8"))["validation_episodes"] == 3
 
 
 def test_vertical_velocity_profile_slows_descent_near_ground() -> None:

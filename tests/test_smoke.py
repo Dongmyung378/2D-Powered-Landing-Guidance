@@ -50,6 +50,11 @@ def test_default_config_loads_and_uses_python_3127() -> None:
     }
     assert config["horizontal_attitude_controller"]["outer_loop"]["max_tilt_deg"] == 15.0
     assert config["integrated_landing_controller"]["control_interval_s"] == 0.1
+    assert config["baseline_tuning"]["search"]["method"] == "grid"
+    assert (
+        config["baseline_tuning"]["search"]["train_seed"]
+        != config["baseline_tuning"]["search"]["validation_seed"]
+    )
 
 
 def test_config_rejects_initial_mass_below_dry_mass() -> None:
@@ -183,6 +188,42 @@ def test_integrated_controller_rejects_incompatible_control_interval() -> None:
 
     with pytest.raises(ValueError, match="integer multiple"):
         plg.IntegratedLandingController.from_config(config)
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("search", "method"), "manual", "method"),
+        (("search", "train_episodes"), 0, "train_episodes"),
+        (("search", "grid", "position_gain_scale"), [], "position_gain_scale"),
+        (("search", "random", "velocity_gain_scale"), [0.0, 1.0], "velocity_gain_scale"),
+        (("objective", "failure_penalty"), 0.0, "failure_penalty"),
+    ],
+)
+def test_config_rejects_invalid_baseline_tuning_settings(path, value, message) -> None:
+    config = deepcopy(plg.load_config(DEFAULT_CONFIG))
+    target = config["baseline_tuning"]
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+
+    with pytest.raises(plg.ConfigError, match=message):
+        plg.validate_config(config)
+
+
+def test_config_rejects_tuning_data_leakage_and_empty_secondary_objective() -> None:
+    config = deepcopy(plg.load_config(DEFAULT_CONFIG))
+    search = config["baseline_tuning"]["search"]
+    search["validation_seed"] = search["train_seed"]
+    with pytest.raises(plg.ConfigError, match="seeds must differ"):
+        plg.validate_config(config)
+
+    config = deepcopy(plg.load_config(DEFAULT_CONFIG))
+    objective = config["baseline_tuning"]["objective"]
+    objective["fuel_weight"] = 0.0
+    objective["landing_error_weight"] = 0.0
+    with pytest.raises(plg.ConfigError, match="must weight"):
+        plg.validate_config(config)
 
 
 def test_week1_sanity_and_termination_verification() -> None:

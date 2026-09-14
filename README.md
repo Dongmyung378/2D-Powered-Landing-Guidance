@@ -15,7 +15,7 @@ A reproducible 2D reusable-rocket powered-landing project that progresses from r
 | Current controllers | Suicide-burn, vertical PID, horizontal-attitude, and integrated landing |
 | Runtime | Python 3.12.7 |
 
-The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, and an integrated PID landing controller. Optimal control, Behavior Cloning, DAgger, disturbances, and Monte Carlo evaluation remain later roadmap stages.
+The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, an integrated PID landing controller, and reproducible baseline tuning. Optimal control, Behavior Cloning, DAgger, disturbances, and Monte Carlo evaluation remain later roadmap stages.
 
 ## Integrated landing benchmark
 
@@ -35,6 +35,20 @@ A fixed batch of 100 medium-difficulty, wind-free initial conditions covered 3 t
 | Maximum observed throttle / gimbal slew | 1.7784 per second / 60.0000 deg/s |
 
 Every trial satisfied all configured landing limits. This is a deterministic wind-free benchmark, not a robustness or hardware-safety result.
+
+## Reproducible baseline tuning
+
+The integrated controller can be tuned with either Cartesian grid search or seeded random search. The default grid evaluates 13 candidates, including the unscaled reference. Candidate selection uses 16 initial conditions from seed 20260912; the selected candidate is then evaluated once on a separate set of 100 conditions from seed 20260913. The validation set does not influence selection.
+
+The score is minimized and combines failure rate, propellant use normalized by the 250 kg capacity, and mean normalized touchdown error across x, vx, vz, attitude, and angular rate:
+
+~~~text
+score = 1000 * failure_rate + 5 * fuel_fraction + 10 * normalized_landing_error
+~~~
+
+The selected scales were 1.10 for horizontal position gain, 0.95 for horizontal velocity gain, and 1.10 for descent-profile deceleration. On the training batch, this candidate and the unscaled reference both landed 16 of 16 cases; the selected candidate reduced the score from 4.179125 to 3.716630 and mean propellant use from 52.9862 kg to 51.1532 kg. On the untouched validation batch it landed 100 of 100 cases, with 51.9394 kg mean propellant use and 0.3942 m mean absolute position error.
+
+The generated report records every candidate, objective term, seed, and validation metric. The generated YAML is a complete loadable configuration. The tracked default remains the fixed tuning reference, while generated tuning outputs stay outside Git.
 
 ## Horizontal-attitude control benchmark
 
@@ -188,6 +202,20 @@ python scripts/evaluate_integrated_control.py --episodes 100 --seed 20260914
 ~~~
 
 The report includes every touchdown state component, fuel use, phase update counts, and observed throttle and gimbal slew rates.
+
+Tune the integrated baseline and save a complete report and best configuration:
+
+~~~powershell
+python scripts/tune_integrated_controller.py --report artifacts/tuning.json --best-config artifacts/best-integrated.yaml
+~~~
+
+Pass `--method random` to run the seeded random search. Neither output is overwritten automatically. The selected configuration can be used directly with other entry points:
+
+~~~powershell
+python scripts/run_episode.py --config artifacts/best-integrated.yaml --initial-state 10 100 0 -20 0 0 1000 --controller integrated-pid --output artifacts/tuned-landing.json --plot artifacts/tuned-landing.png --animation artifacts/tuned-landing.gif --fps 20 --max-frames 240
+~~~
+
+GIF rendering is completed after the simulation and can take several seconds. `--max-frames` controls rendering time and output size by downsampling the recorded trajectory; it does not alter the simulated physics.
 
 ## Suicide-burn calculation
 
