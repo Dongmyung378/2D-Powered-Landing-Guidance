@@ -49,6 +49,7 @@ def test_default_config_loads_and_uses_python_3127() -> None:
         "kd": 0.01,
     }
     assert config["horizontal_attitude_controller"]["outer_loop"]["max_tilt_deg"] == 15.0
+    assert config["integrated_landing_controller"]["control_interval_s"] == 0.1
 
 
 def test_config_rejects_initial_mass_below_dry_mass() -> None:
@@ -149,6 +150,39 @@ def test_config_rejects_invalid_horizontal_controller_settings(
 
     with pytest.raises(plg.ConfigError, match=message):
         plg.validate_config(config)
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("control_interval_s",), 0.0, "control_interval_s"),
+        (("compensate_vertical_thrust",), 1, "compensate_vertical_thrust"),
+        (("slew_rates", "throttle_per_s"), 0.0, "throttle_per_s"),
+        (
+            ("phases", "terminal", "horizontal_outer_loop", "max_tilt_deg"),
+            46.0,
+            "max_tilt_deg",
+        ),
+        (("evaluation", "vz_m_s"), [-5.0, 1.0], "vz_m_s"),
+    ],
+)
+def test_config_rejects_invalid_integrated_controller_settings(path, value, message) -> None:
+    config = deepcopy(plg.load_config(DEFAULT_CONFIG))
+    target = config["integrated_landing_controller"]
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+
+    with pytest.raises(plg.ConfigError, match=message):
+        plg.validate_config(config)
+
+
+def test_integrated_controller_rejects_incompatible_control_interval() -> None:
+    config = deepcopy(plg.load_config(DEFAULT_CONFIG))
+    config["integrated_landing_controller"]["control_interval_s"] = 0.03
+
+    with pytest.raises(ValueError, match="integer multiple"):
+        plg.IntegratedLandingController.from_config(config)
 
 
 def test_week1_sanity_and_termination_verification() -> None:

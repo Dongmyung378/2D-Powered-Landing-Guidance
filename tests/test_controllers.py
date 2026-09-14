@@ -11,6 +11,7 @@ import pytest
 from powered_landing_guidance import load_config
 from powered_landing_guidance.controllers import (
     HorizontalAttitudeController,
+    IntegratedLandingController,
     SuicideBurnController,
     VerticalVelocityPIDController,
     VerticalVelocityProfile,
@@ -24,6 +25,10 @@ from powered_landing_guidance.model import State
 from scripts.evaluate_horizontal_control import (
     evaluate_horizontal_control,
     sample_horizontal_initial_states,
+)
+from scripts.evaluate_integrated_control import (
+    evaluate_integrated_control,
+    sample_integrated_initial_states,
 )
 from scripts.sweep_velocity_gains import evaluate_gains, sample_vertical_initial_states
 
@@ -94,6 +99,73 @@ def test_horizontal_evaluation_is_reproducible_and_converges_toward_pad() -> Non
         <= CONFIG["horizontal_attitude_controller"]["outer_loop"]["max_tilt_deg"]
     )
     assert result.max_gimbal_deg <= CONFIG["vehicle"]["gimbal_limit_deg"]
+
+
+def test_integrated_controller_holds_action_between_control_updates() -> None:
+    controller = IntegratedLandingController.from_config(CONFIG)
+    state = State(8.0, 100.0, 0.0, -20.0, 0.0, 0.0, 1000.0)
+
+    first = controller.command(state, time_s=0.0)
+    held = controller.command(state, time_s=CONFIG["simulation"]["dt_s"])
+
+    assert controller.update_count == 1
+    assert not controller.updated_this_step
+    np.testing.assert_array_equal(held, first)
+
+    controller.command(state, time_s=controller.control_interval_s)
+    assert controller.update_count == 2
+    assert controller.updated_this_step
+
+
+def test_integrated_controller_switches_phase_by_altitude() -> None:
+    controller = IntegratedLandingController.from_config(CONFIG)
+    high = State(0.0, 50.0, 0.0, -10.0, 0.0, 0.0, 1000.0)
+    low = State(0.0, 20.0, 0.0, -5.0, 0.0, 0.0, 990.0)
+
+    controller.command(high, time_s=0.0)
+    assert controller.phase == "approach"
+
+    controller.command(low, time_s=controller.control_interval_s)
+    assert controller.phase == "terminal"
+
+
+def test_integrated_controller_limits_command_slew_rate() -> None:
+    controller = IntegratedLandingController.from_config(CONFIG)
+    slow = State(10.0, 100.0, 0.0, 10.0, 0.0, 0.0, 1000.0)
+    fast = State(-10.0, 100.0, 0.0, -50.0, np.deg2rad(-20.0), 0.0, 1000.0)
+    first = controller.command(slow, time_s=0.0)
+    second = controller.command(fast, time_s=controller.control_interval_s)
+
+    change = np.abs(second - first)
+    assert change[0] <= (
+        controller.throttle_slew_rate_per_s * controller.control_interval_s + 1e-12
+    )
+    assert change[1] <= (controller.gimbal_slew_rate_rad_s * controller.control_interval_s + 1e-12)
+    assert controller.throttle_slew_limited
+    assert controller.gimbal_slew_limited
+
+
+def test_integrated_evaluation_is_reproducible_and_lands_safely() -> None:
+    first = sample_integrated_initial_states(CONFIG, episodes=12, seed=20260914)
+    second = sample_integrated_initial_states(CONFIG, episodes=12, seed=20260914)
+
+    np.testing.assert_array_equal(first, second)
+    result = evaluate_integrated_control(CONFIG, first)
+
+    assert result.successes == result.episodes
+    assert result.max_abs_touchdown_x_m <= CONFIG["landing_success"]["max_abs_x_m"]
+    assert result.max_abs_touchdown_vx_m_s <= CONFIG["landing_success"]["max_abs_vx_m_s"]
+    assert result.max_abs_touchdown_vz_m_s <= CONFIG["landing_success"]["max_abs_vz_m_s"]
+    assert result.max_abs_touchdown_theta_deg <= CONFIG["landing_success"]["max_abs_theta_deg"]
+    assert result.max_abs_touchdown_omega_deg_s <= CONFIG["landing_success"]["max_abs_omega_deg_s"]
+    assert (
+        result.max_throttle_slew_per_s
+        <= CONFIG["integrated_landing_controller"]["slew_rates"]["throttle_per_s"] + 1e-10
+    )
+    assert (
+        result.max_gimbal_slew_deg_s
+        <= CONFIG["integrated_landing_controller"]["slew_rates"]["gimbal_deg_s"] + 1e-10
+    )
 
 
 def test_vertical_velocity_profile_slows_descent_near_ground() -> None:

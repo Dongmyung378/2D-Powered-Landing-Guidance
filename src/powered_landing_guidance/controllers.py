@@ -360,6 +360,210 @@ class HorizontalAttitudeController:
         return np.asarray((throttle, gimbal), dtype=np.float64)
 
 
+@dataclass(slots=True)
+class IntegratedLandingController:
+    """Combine phase-specific vertical and horizontal controllers at a fixed control rate."""
+
+    parameters: PlanarDynamicsParameters
+    ground_z_m: float
+    simulation_interval_s: float
+    control_interval_s: float
+    terminal_phase_below_m: float
+    approach_vertical: VerticalVelocityPIDController
+    terminal_vertical: VerticalVelocityPIDController
+    approach_horizontal: HorizontalAttitudeController
+    terminal_horizontal: HorizontalAttitudeController
+    throttle_slew_rate_per_s: float
+    gimbal_slew_rate_rad_s: float
+    held_action: NDArray[np.float64] | None = field(init=False, default=None)
+    raw_action: NDArray[np.float64] | None = field(init=False, default=None)
+    phase: Literal["approach", "terminal"] | None = field(init=False, default=None)
+    next_update_time_s: float = field(init=False, default=0.0)
+    last_update_time_s: float | None = field(init=False, default=None)
+    last_command_time_s: float | None = field(init=False, default=None)
+    update_count: int = field(init=False, default=0)
+    updated_this_step: bool = field(init=False, default=False)
+    throttle_slew_limited: bool = field(init=False, default=False)
+    gimbal_slew_limited: bool = field(init=False, default=False)
+
+    def __post_init__(self) -> None:
+        self.ground_z_m = float(self.ground_z_m)
+        if not np.isfinite(self.ground_z_m):
+            raise ValueError("ground_z_m must be finite")
+        self.simulation_interval_s = _positive(
+            self.simulation_interval_s,
+            "simulation_interval_s",
+        )
+        self.control_interval_s = _positive(self.control_interval_s, "control_interval_s")
+        ratio = self.control_interval_s / self.simulation_interval_s
+        if ratio < 1.0 or not np.isclose(ratio, round(ratio), rtol=0.0, atol=1e-10):
+            raise ValueError(
+                "control_interval_s must be an integer multiple of simulation_interval_s"
+            )
+        self.terminal_phase_below_m = _positive(
+            self.terminal_phase_below_m,
+            "terminal_phase_below_m",
+        )
+        self.throttle_slew_rate_per_s = _positive(
+            self.throttle_slew_rate_per_s,
+            "throttle_slew_rate_per_s",
+        )
+        self.gimbal_slew_rate_rad_s = _positive(
+            self.gimbal_slew_rate_rad_s,
+            "gimbal_slew_rate_rad_s",
+        )
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> IntegratedLandingController:
+        """Build both control phases from the shared project configuration."""
+        parameters = PlanarDynamicsParameters.from_config(config)
+        settings = config["integrated_landing_controller"]
+        control_interval = float(settings["control_interval_s"])
+        integral_limit = float(settings["anti_windup_integral_limit_m"])
+        target_x = float(settings["target_x_m"])
+        compensate = bool(settings["compensate_vertical_thrust"])
+
+        def vertical_controller(phase: dict[str, Any]) -> VerticalVelocityPIDController:
+            profile = phase["vertical_profile"]
+            gains = phase["vertical_gains"]
+            return VerticalVelocityPIDController(
+                parameters=parameters,
+                ground_z_m=float(config["simulation"]["ground_z_m"]),
+                control_interval_s=control_interval,
+                profile=VerticalVelocityProfile(
+                    touchdown_speed_m_s=float(profile["touchdown_speed_m_s"]),
+                    max_descent_speed_m_s=float(profile["max_descent_speed_m_s"]),
+                    deceleration_m_s2=float(profile["deceleration_m_s2"]),
+                ),
+                kp=float(gains["kp"]),
+                ki=float(gains["ki"]),
+                kd=float(gains["kd"]),
+                integral_limit_m=integral_limit,
+            )
+
+        def horizontal_controller(phase: dict[str, Any]) -> HorizontalAttitudeController:
+            outer = phase["horizontal_outer_loop"]
+            inner = phase["attitude_inner_loop"]
+            return HorizontalAttitudeController(
+                parameters=parameters,
+                target_x_m=target_x,
+                position_kp_s2=float(outer["position_kp_s2"]),
+                velocity_kd_s=float(outer["velocity_kd_s"]),
+                max_horizontal_acceleration_m_s2=float(outer["max_horizontal_acceleration_m_s2"]),
+                max_tilt_rad=float(np.deg2rad(outer["max_tilt_deg"])),
+                attitude_kp_s2=float(inner["attitude_kp_s2"]),
+                angular_rate_kd_s=float(inner["angular_rate_kd_s"]),
+                compensate_vertical_thrust=compensate,
+            )
+
+        phases = settings["phases"]
+        approach = phases["approach"]
+        terminal = phases["terminal"]
+        return cls(
+            parameters=parameters,
+            ground_z_m=float(config["simulation"]["ground_z_m"]),
+            simulation_interval_s=float(config["simulation"]["dt_s"]),
+            control_interval_s=control_interval,
+            terminal_phase_below_m=float(settings["terminal_phase_below_m"]),
+            approach_vertical=vertical_controller(approach),
+            terminal_vertical=vertical_controller(terminal),
+            approach_horizontal=horizontal_controller(approach),
+            terminal_horizontal=horizontal_controller(terminal),
+            throttle_slew_rate_per_s=float(settings["slew_rates"]["throttle_per_s"]),
+            gimbal_slew_rate_rad_s=float(np.deg2rad(settings["slew_rates"]["gimbal_deg_s"])),
+        )
+
+    def reset(self) -> None:
+        """Clear both control phases, the held command, and timing state."""
+        self.approach_vertical.reset()
+        self.terminal_vertical.reset()
+        self.approach_horizontal.reset()
+        self.terminal_horizontal.reset()
+        self.held_action = None
+        self.raw_action = None
+        self.phase = None
+        self.next_update_time_s = 0.0
+        self.last_update_time_s = None
+        self.last_command_time_s = None
+        self.update_count = 0
+        self.updated_this_step = False
+        self.throttle_slew_limited = False
+        self.gimbal_slew_limited = False
+
+    def _phase_controllers(
+        self,
+        altitude_m: float,
+    ) -> tuple[
+        Literal["approach", "terminal"],
+        VerticalVelocityPIDController,
+        HorizontalAttitudeController,
+    ]:
+        if altitude_m <= self.terminal_phase_below_m:
+            return "terminal", self.terminal_vertical, self.terminal_horizontal
+        return "approach", self.approach_vertical, self.approach_horizontal
+
+    def _apply_slew_limits(
+        self,
+        raw_action: NDArray[np.float64],
+        elapsed_s: float,
+    ) -> NDArray[np.float64]:
+        if self.held_action is None:
+            self.throttle_slew_limited = False
+            self.gimbal_slew_limited = False
+            return raw_action.copy()
+        limits = np.asarray(
+            (
+                self.throttle_slew_rate_per_s * elapsed_s,
+                self.gimbal_slew_rate_rad_s * elapsed_s,
+            )
+        )
+        lower = self.held_action - limits
+        upper = self.held_action + limits
+        limited = np.clip(raw_action, lower, upper)
+        self.throttle_slew_limited = not np.isclose(limited[0], raw_action[0], atol=1e-12)
+        self.gimbal_slew_limited = not np.isclose(limited[1], raw_action[1], atol=1e-12)
+        return limited
+
+    def command(
+        self,
+        state: State | ArrayLike,
+        *,
+        time_s: float,
+    ) -> NDArray[np.float64]:
+        """Update on the control clock and hold the command on intermediate simulation steps."""
+        current = state if isinstance(state, State) else State.from_array(state)
+        time = _nonnegative(time_s, "time_s")
+        if self.last_command_time_s is not None and time < self.last_command_time_s - 1e-12:
+            raise ValueError("time_s must be nondecreasing")
+        self.last_command_time_s = time
+        self.updated_this_step = False
+        if self.held_action is not None and time < self.next_update_time_s - 1e-12:
+            return self.held_action.copy()
+
+        altitude = current.z - self.ground_z_m
+        if altitude < 0.0:
+            raise ValueError("state cannot be below ground")
+        phase, vertical, horizontal = self._phase_controllers(altitude)
+        base_throttle = float(vertical.command(current)[0])
+        raw_action = horizontal.command(current, base_throttle=base_throttle)
+        elapsed = (
+            self.control_interval_s
+            if self.last_update_time_s is None
+            else time - self.last_update_time_s
+        )
+        action = self._apply_slew_limits(raw_action, elapsed)
+
+        self.raw_action = raw_action.copy()
+        self.held_action = action.copy()
+        self.phase = phase
+        self.last_update_time_s = time
+        while self.next_update_time_s <= time + 1e-12:
+            self.next_update_time_s += self.control_interval_s
+        self.update_count += 1
+        self.updated_this_step = True
+        return action
+
+
 def estimate_suicide_burn(
     state: State | ArrayLike,
     parameters: PlanarDynamicsParameters,

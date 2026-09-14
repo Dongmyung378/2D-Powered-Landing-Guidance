@@ -297,4 +297,30 @@ The reproducible evaluation uses 100 wind-free, fixed-duration hover trials at 1
 python scripts/evaluate_horizontal_control.py --episodes 100 --seed 20260914
 ~~~
 
-This result establishes wind-free convergence toward the pad. It does not claim touchdown success; vertical-throttle and horizontal-gimbal commands remain separate until the integrated-controller stage.
+This isolated result establishes wind-free convergence toward the pad without claiming touchdown success. The integrated controller below combines these commands and evaluates complete landings.
+
+## 17. Integrated landing controller
+
+`IntegratedLandingController` combines the vertical-velocity PID throttle with horizontal-position and attitude gimbal control. The simulator advances at 0.02-second intervals, while the controller updates every 0.1 seconds. The latest command is held for the four intermediate simulation steps. The controller rejects a control interval that is shorter than, or not an integer multiple of, the simulation interval.
+
+Altitude selects one of two independently stateful control phases. Above 30 m, the approach phase uses a 1.0 m/s touchdown target, 1.5 m/s² profile deceleration, vertical PID gains `(0.08, 0.001, 0.01)`, horizontal gains `(0.5, 1.7)`, and a 15-degree target-tilt limit. At or below 30 m, the terminal phase uses a 0.8 m/s touchdown target, 1.0 m/s² profile deceleration, vertical PID gains `(0.1, 0.001, 0.015)`, horizontal gains `(0.3, 1.35)`, and a 5-degree target-tilt limit. The terminal limits prioritize an upright, low-rate contact.
+
+The vertical controller first produces base throttle. The selected horizontal-attitude controller then calculates gimbal and compensates the tilted thrust's vertical component. The combined command is finally limited relative to the previous control update:
+
+~~~text
+abs(throttle[k] - throttle[k-1]) <= 2.0 * control_interval
+abs(gimbal[k] - gimbal[k-1]) <= deg2rad(60) * control_interval
+~~~
+
+The first calculated command initializes the held action because no previous controller output exists. Later updates expose separate throttle and gimbal slew-limit flags. Time must be finite, nonnegative, and nondecreasing. `reset` clears both phases, held commands, update counters, and scheduling state.
+
+The medium-difficulty evaluation samples 100 wind-free cases with horizontal error from 3 to 15 m on either side of the pad, altitude from 80 to 120 m, horizontal speed from -2 to 2 m/s, vertical speed from -25 to -15 m/s, attitude from -5 to 5 degrees, angular rate from -2 to 2 deg/s, and mass from 950 to 1000 kg. With seed 20260914, all 100 cases satisfied every touchdown limit.
+
+Mean and maximum absolute touchdown position were 0.4516 m and 0.9440 m. Mean and maximum horizontal speed were 0.1476 m/s and 0.3526 m/s. Mean and maximum vertical speed were 0.7819 m/s and 0.7827 m/s. Mean and maximum attitude were 0.7559 degrees and 1.4386 degrees, while angular-rate values were 1.1004 deg/s and 2.4399 deg/s. Mean propellant use was 53.0159 kg. Maximum observed slew was 1.7784 throttle units per second and 60.0000 deg/s gimbal.
+
+~~~powershell
+python scripts/evaluate_integrated_control.py --episodes 100 --seed 20260914
+python scripts/run_episode.py --initial-state 10 100 0 -20 0 0 1000 --controller integrated-pid
+~~~
+
+This controller is a deterministic wind-free baseline. Disturbance rejection, uncertainty, sensor noise, actuator delay, gain optimization, and hardware safety remain outside this result.

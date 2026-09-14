@@ -68,6 +68,7 @@ def validate_config(config: Config) -> None:
     landing = _mapping(config, "landing_success")
     velocity_controller = _mapping(config, "vertical_velocity_controller")
     horizontal_controller = _mapping(config, "horizontal_attitude_controller")
+    integrated_controller = _mapping(config, "integrated_landing_controller")
 
     if str(project.get("python_version")) != "3.12.7":
         raise ConfigError("project.python_version must be '3.12.7'")
@@ -218,6 +219,73 @@ def validate_config(config: Config) -> None:
         raise ConfigError("horizontal evaluation theta_deg cannot exceed max_tilt_deg")
     if horizontal_mass_range[0] < dry_mass:
         raise ConfigError("horizontal evaluation mass_kg cannot extend below dry mass")
+
+    integrated_target_x = _finite(integrated_controller, "target_x_m")
+    _positive(integrated_controller, "control_interval_s")
+    _positive(integrated_controller, "terminal_phase_below_m")
+    _positive(integrated_controller, "anti_windup_integral_limit_m")
+    if not isinstance(integrated_controller.get("compensate_vertical_thrust"), bool):
+        raise ConfigError("integrated compensate_vertical_thrust must be boolean")
+
+    slew_rates = _mapping(integrated_controller, "slew_rates")
+    _positive(slew_rates, "throttle_per_s")
+    _positive(slew_rates, "gimbal_deg_s")
+
+    phases = _mapping(integrated_controller, "phases")
+    if set(phases) != {"approach", "terminal"}:
+        raise ConfigError("integrated phases must contain exactly approach and terminal")
+    phase_max_tilts: list[float] = []
+    for phase_name in ("approach", "terminal"):
+        phase = _mapping(phases, phase_name)
+        phase_profile = _mapping(phase, "vertical_profile")
+        phase_touchdown_speed = _positive(phase_profile, "touchdown_speed_m_s")
+        phase_max_descent_speed = _positive(phase_profile, "max_descent_speed_m_s")
+        _positive(phase_profile, "deceleration_m_s2")
+        if phase_max_descent_speed < phase_touchdown_speed:
+            raise ConfigError(
+                f"integrated {phase_name} max_descent_speed_m_s must be at least "
+                "touchdown_speed_m_s"
+            )
+
+        phase_vertical_gains = _mapping(phase, "vertical_gains")
+        for key in ("kp", "ki", "kd"):
+            _nonnegative(phase_vertical_gains, key)
+
+        phase_outer = _mapping(phase, "horizontal_outer_loop")
+        _nonnegative(phase_outer, "position_kp_s2")
+        _nonnegative(phase_outer, "velocity_kd_s")
+        _positive(phase_outer, "max_horizontal_acceleration_m_s2")
+        phase_max_tilt = _positive(phase_outer, "max_tilt_deg")
+        if phase_max_tilt > 45.0:
+            raise ConfigError(f"integrated {phase_name} max_tilt_deg cannot exceed 45")
+        phase_max_tilts.append(phase_max_tilt)
+
+        phase_inner = _mapping(phase, "attitude_inner_loop")
+        _positive(phase_inner, "attitude_kp_s2")
+        _nonnegative(phase_inner, "angular_rate_kd_s")
+
+    integrated_evaluation = _mapping(integrated_controller, "evaluation")
+    integrated_min_abs_x = _positive(integrated_evaluation, "min_abs_x_m")
+    integrated_x_range = _range(integrated_evaluation, "x_m")
+    integrated_z_range = _range(integrated_evaluation, "z_m")
+    _range(integrated_evaluation, "vx_m_s")
+    integrated_vz_range = _range(integrated_evaluation, "vz_m_s")
+    integrated_theta_range = _range(integrated_evaluation, "theta_deg")
+    _range(integrated_evaluation, "omega_deg_s")
+    integrated_mass_range = _range(integrated_evaluation, "mass_kg")
+    if (
+        integrated_x_range[0] > integrated_target_x - integrated_min_abs_x
+        or integrated_x_range[1] < integrated_target_x + integrated_min_abs_x
+    ):
+        raise ConfigError("integrated evaluation x_m must cover both sides of min_abs_x_m")
+    if integrated_z_range[0] <= ground:
+        raise ConfigError("integrated evaluation z_m must be above ground")
+    if integrated_vz_range[1] > 0.0:
+        raise ConfigError("integrated evaluation vz_m_s must contain descending speeds")
+    if max(abs(integrated_theta_range[0]), abs(integrated_theta_range[1])) > max(phase_max_tilts):
+        raise ConfigError("integrated evaluation theta_deg exceeds the configured phase tilt limit")
+    if integrated_mass_range[0] < dry_mass:
+        raise ConfigError("integrated evaluation mass_kg cannot extend below dry mass")
 
 
 def load_config(path: str | Path) -> Config:

@@ -9,6 +9,7 @@ import numpy as np
 
 from powered_landing_guidance import load_config
 from powered_landing_guidance.controllers import (
+    IntegratedLandingController,
     SuicideBurnController,
     VerticalVelocityPIDController,
 )
@@ -45,7 +46,7 @@ def main() -> None:
     parser.add_argument("--gimbal-deg", type=float, default=0.0)
     parser.add_argument(
         "--controller",
-        choices=("suicide-burn", "velocity-pid"),
+        choices=("integrated-pid", "suicide-burn", "velocity-pid"),
         help="baseline controller that computes commands from state",
     )
     parser.add_argument("--output", type=Path, help="save the episode as JSON or NPZ")
@@ -85,14 +86,19 @@ def main() -> None:
         if args.initial_state is not None:
             options["initial_state"] = args.initial_state
         try:
-            state, _ = env.reset(seed=args.seed, options=options)
+            state, info = env.reset(seed=args.seed, options=options)
             if args.controller == "suicide-burn":
                 controller = SuicideBurnController.from_config(config)
             elif args.controller == "velocity-pid":
                 controller = VerticalVelocityPIDController.from_config(config)
+            elif args.controller == "integrated-pid":
+                controller = IntegratedLandingController.from_config(config)
             fixed_action = [args.throttle, np.deg2rad(args.gimbal_deg)]
             while True:
-                action = controller.command(state) if controller is not None else fixed_action
+                if isinstance(controller, IntegratedLandingController):
+                    action = controller.command(state, time_s=float(info["time_s"]))
+                else:
+                    action = controller.command(state) if controller is not None else fixed_action
                 state, _, terminated, truncated, info = env.step(action)
                 if terminated or truncated:
                     break
@@ -117,6 +123,11 @@ def main() -> None:
         print(
             f"target vertical speed={controller.target_vertical_speed_m_s:.6f} m/s, "
             f"final throttle={controller.throttle:.6f}, saturated={controller.saturated}"
+        )
+    elif isinstance(controller, IntegratedLandingController):
+        print(
+            f"final phase={controller.phase}, control updates={controller.update_count}, "
+            f"held action={controller.held_action.tolist()}"
         )
     if args.output:
         print(f"saved: {save_episode_data(episode, args.output)}")

@@ -3,6 +3,7 @@
 from powered_landing_guidance.config import ConfigError, load_config, validate_config
 from powered_landing_guidance.controllers import (
     HorizontalAttitudeController,
+    IntegratedLandingController,
     SuicideBurnController,
     SuicideBurnEstimate,
     VerticalVelocityPIDController,
@@ -28,6 +29,7 @@ __all__ = [
     "ConfigError",
     "Control",
     "HorizontalAttitudeController",
+    "IntegratedLandingController",
     "State",
     "SuicideBurnController",
     "SuicideBurnEstimate",

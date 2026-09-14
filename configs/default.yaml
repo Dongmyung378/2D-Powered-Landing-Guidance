@@ -107,3 +107,57 @@ horizontal_attitude_controller:
     theta_deg: [-5.0, 5.0]
     omega_deg_s: [-2.0, 2.0]
     mass_kg: [950.0, 1000.0]
+
+integrated_landing_controller:
+  target_x_m: 0.0
+  control_interval_s: 0.1
+  terminal_phase_below_m: 30.0
+  anti_windup_integral_limit_m: 10.0
+  compensate_vertical_thrust: true
+  slew_rates:
+    throttle_per_s: 2.0
+    gimbal_deg_s: 60.0
+  phases:
+    approach:
+      vertical_profile:
+        touchdown_speed_m_s: 1.0
+        max_descent_speed_m_s: 30.0
+        deceleration_m_s2: 1.5
+      vertical_gains:
+        kp: 0.08
+        ki: 0.001
+        kd: 0.01
+      horizontal_outer_loop:
+        position_kp_s2: 0.5
+        velocity_kd_s: 1.7
+        max_horizontal_acceleration_m_s2: 3.0
+        max_tilt_deg: 15.0
+      attitude_inner_loop:
+        attitude_kp_s2: 4.0
+        angular_rate_kd_s: 3.0
+    terminal:
+      vertical_profile:
+        touchdown_speed_m_s: 0.8
+        max_descent_speed_m_s: 15.0
+        deceleration_m_s2: 1.0
+      vertical_gains:
+        kp: 0.1
+        ki: 0.001
+        kd: 0.015
+      horizontal_outer_loop:
+        position_kp_s2: 0.3
+        velocity_kd_s: 1.35
+        max_horizontal_acceleration_m_s2: 1.0
+        max_tilt_deg: 5.0
+      attitude_inner_loop:
+        attitude_kp_s2: 6.0
+        angular_rate_kd_s: 4.0
+  evaluation:
+    x_m: [-15.0, 15.0]
+    min_abs_x_m: 3.0
+    z_m: [80.0, 120.0]
+    vx_m_s: [-2.0, 2.0]
+    vz_m_s: [-25.0, -15.0]
+    theta_deg: [-5.0, 5.0]
+    omega_deg_s: [-2.0, 2.0]
+    mass_kg: [950.0, 1000.0]

@@ -12,10 +12,29 @@
 | 모델 | 가변 질량 평면 3자유도 |
 | 상태 | x, z, vx, vz, theta, omega, mass |
 | 제어 | throttle, gimbal angle |
-| 현재 제어기 | Suicide-burn, 수직속도 PID, 수평·자세 제어 |
+| 현재 제어기 | Suicide-burn, 수직 PID, 수평·자세 제어, 통합 착륙 제어 |
 | 실행 환경 | Python 3.12.7 |
 
-현재 저장소에는 검증된 시뮬레이션 환경, 두 가지 비학습 수직 착륙 기준선과 수평 위치·자세 직렬 제어기가 구현되어 있습니다. 수직·수평 착륙 통합, 최적제어, Behavior Cloning, DAgger, 외란과 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
+현재 저장소에는 검증된 시뮬레이션 환경, 두 가지 비학습 수직 착륙 기준선, 수평 위치·자세 직렬 제어기와 통합 PID 착륙 제어기가 구현되어 있습니다. 최적제어, Behavior Cloning, DAgger, 외란과 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
+
+## 통합 착륙 벤치마크
+
+통합 제어기는 수직 throttle과 수평·자세 gimbal 제어를 결합합니다. 시뮬레이터는 50 Hz, 제어기는 10 Hz로 실행하며 제어 갱신 사이에는 이전 명령을 유지합니다. 30 m를 기준으로 접근·말기 phase의 속도 profile과 gain을 전환합니다. Throttle 변화율은 초당 2.0, gimbal 변화율은 초당 60도로 제한합니다.
+
+고정 seed로 생성한 무풍 중간 난이도 초기조건 100개는 수평 오차 3-15 m, 고도 80-120 m, 수평 속도 -2~2 m/s, 수직 속도 -25~-15 m/s, 자세 -5~5도, 각속도 -2~2 deg/s, 질량 950-1000 kg 범위를 포함합니다.
+
+| 평가 항목 | 결과 |
+|---|---:|
+| 안전 착륙 | 100 / 100 |
+| 평균 / 최대 절대 접지 위치 | 0.4516 / 0.9440 m |
+| 평균 / 최대 수평 접지 속도 | 0.1476 / 0.3526 m/s |
+| 평균 / 최대 수직 접지 속도 | 0.7819 / 0.7827 m/s |
+| 평균 / 최대 접지 자세 | 0.7559 / 1.4386도 |
+| 평균 / 최대 접지 각속도 | 1.1004 / 2.4399 deg/s |
+| 평균 연료 사용량 | 53.0159 kg |
+| 최대 throttle / gimbal 변화율 | 초당 1.7784 / 초당 60.0000도 |
+
+모든 실험이 설정된 착륙 제한을 전부 만족했습니다. 이 결과는 결정론적 무풍 시뮬레이션 기준이며 강건성이나 실제 하드웨어 안전을 의미하지 않습니다.
 
 ## 수평·자세 제어 벤치마크
 
@@ -33,7 +52,7 @@
 | 최대 gimbal 명령 | 7.0393도 |
 | 최대 고도 편차 | 0.0149 m |
 
-이 벤치마크는 무풍 조건의 착륙장 방향 수렴 기준을 만족합니다. 수평 제어와 수직 제어는 다음 통합 단계 전까지 의도적으로 분리되어 있으므로 아직 완전한 착륙 제어 결과는 아닙니다.
+이 분리 벤치마크는 통합 착륙 제어기와 별개로 수평 동작만 진단할 때 계속 사용할 수 있습니다.
 
 ## 수직속도 PID 벤치마크
 
@@ -92,7 +111,13 @@ python --version
 python -m pip install -e ".[dev]"
 ~~~
 
-## 수직 착륙 제어기 실행
+## 착륙 제어기 실행
+
+수평·수직 오차가 있는 상태에서 통합 제어기를 실행합니다.
+
+~~~powershell
+python scripts/run_episode.py --initial-state 10 100 0 -20 0 0 1000 --controller integrated-pid
+~~~
 
 수직속도 PID 제어기를 실행합니다.
 
@@ -108,10 +133,10 @@ python scripts/run_episode.py --initial-state 0 100 0 -20 0 0 1000 --controller 
 
 초기조건 순서는 x z vx vz theta omega mass입니다. 모든 값은 SI 단위이며 theta와 omega는 rad와 rad/s를 사용합니다.
 
-에피소드 기록, 진단 그래프와 애니메이션을 함께 저장하려면 다음과 같이 실행합니다.
+통합 착륙 에피소드 기록, 진단 그래프와 애니메이션을 함께 저장합니다.
 
 ~~~powershell
-python scripts/run_episode.py --initial-state 0 100 0 -20 0 0 1000 --controller velocity-pid --output artifacts/velocity-pid.json --plot artifacts/velocity-pid.png --animation artifacts/velocity-pid.gif
+python scripts/run_episode.py --initial-state 10 100 0 -20 0 0 1000 --controller integrated-pid --output artifacts/integrated.json --plot artifacts/integrated.png --animation artifacts/integrated.gif
 ~~~
 
 저장된 기록을 물리 계산 없이 재생할 수 있습니다.
@@ -155,6 +180,14 @@ python scripts/evaluate_horizontal_control.py --episodes 100 --seed 20260914
 ~~~
 
 착륙장 방향 수렴률, 위치 오차 감소량, 최대 기울기·gimbal과 수직 추력 보상 중 고도 편차를 출력합니다.
+
+중간 난이도 초기조건 100개의 통합 착륙 벤치마크를 실행합니다.
+
+~~~powershell
+python scripts/evaluate_integrated_control.py --episodes 100 --seed 20260914
+~~~
+
+모든 접지 상태값, 연료 사용량, phase별 제어 갱신 횟수와 실제 throttle·gimbal 변화율을 출력합니다.
 
 ## Suicide-burn 계산
 
@@ -218,7 +251,7 @@ Git에 포함되는 저장소에는 소스 코드, 재현 가능한 설정, 기�
 ## 현재 한계
 
 - 착륙 직전 동력 하강만 다루며 발사, 상승, 귀환 기동과 재진입은 범위 밖입니다.
-- 수평 제어와 수직 제어는 각각 검증했지만 하나의 접지 제어기로 아직 통합하지 않았습니다.
+- 통합 제어기는 현재 결정론적 무풍 시뮬레이션에서만 검증했습니다.
 - 공기저항, 바람, 센서 잡음, 추력 오차와 엔진 지연은 아직 적용하지 않았습니다.
 - 지면 접촉은 착륙 다리와 구조 충격이 없는 점 모델입니다.
 - 성공 기준 2 m/s는 시뮬레이션 판정값이며 하드웨어 안전을 보증하지 않습니다.

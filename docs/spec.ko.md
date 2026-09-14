@@ -299,4 +299,30 @@ sin(gimbal) = -target_alpha * inertia / (lever_arm * thrust)
 python scripts/evaluate_horizontal_control.py --episodes 100 --seed 20260914
 ~~~
 
-이 결과는 무풍에서 착륙장 방향으로 수렴함을 검증합니다. 아직 접지 성공을 의미하지 않으며 수직 throttle과 수평 gimbal 명령은 통합 제어기 단계 전까지 분리되어 있습니다.
+이 분리 결과는 무풍에서 착륙장 방향으로 수렴함을 검증하지만 자체적으로 접지 성공을 의미하지는 않습니다. 아래 통합 제어기는 두 명령을 결합하고 전체 착륙을 평가합니다.
+
+## 통합 착륙 제어기
+
+`IntegratedLandingController`는 수직속도 PID throttle과 수평 위치·자세 gimbal 제어를 결합합니다. 시뮬레이터는 0.02초 간격으로 진행하고 제어기는 0.1초마다 갱신합니다. 중간의 시뮬레이션 4개 step에서는 가장 최근 명령을 유지합니다. 제어 주기가 시뮬레이션 주기보다 짧거나 정수배가 아니면 설정을 거부합니다.
+
+고도에 따라 독립적인 상태를 가진 두 제어 phase 중 하나를 선택합니다. 30 m보다 높으면 접근 phase가 접지 목표속도 1.0 m/s, profile 감속도 1.5 m/s², 수직 PID gain `(0.08, 0.001, 0.01)`, 수평 gain `(0.5, 1.7)`, 목표 기울기 제한 15도를 사용합니다. 30 m 이하에서는 말기 phase가 접지 목표속도 0.8 m/s, profile 감속도 1.0 m/s², 수직 PID gain `(0.1, 0.001, 0.015)`, 수평 gain `(0.3, 1.35)`, 목표 기울기 제한 5도를 사용합니다. 말기 제한은 접지 자세와 각속도를 낮추는 데 우선순위를 둡니다.
+
+수직 제어기가 기본 throttle을 먼저 계산합니다. 선택된 수평·자세 제어기는 gimbal을 계산하고 기울어진 추력의 수직 성분을 보상합니다. 마지막으로 이전 제어 갱신값을 기준으로 통합 명령의 변화량을 제한합니다.
+
+~~~text
+abs(throttle[k] - throttle[k-1]) <= 2.0 * control_interval
+abs(gimbal[k] - gimbal[k-1]) <= deg2rad(60) * control_interval
+~~~
+
+비교할 이전 출력이 없으므로 첫 계산 명령은 held action의 초기값이 됩니다. 이후 갱신에서는 throttle과 gimbal 변화율 제한 여부를 따로 제공합니다. 시간은 유한한 0 이상의 값이며 감소할 수 없습니다. `reset`은 두 phase, held action, 갱신 횟수와 scheduling 상태를 모두 초기화합니다.
+
+중간 난이도 평가는 무풍 초기조건 100개를 사용합니다. 수평 오차는 착륙장 양쪽에서 3-15 m, 고도 80-120 m, 수평 속도 -2~2 m/s, 수직 속도 -25~-15 m/s, 자세 -5~5도, 각속도 -2~2 deg/s, 질량 950-1000 kg 범위입니다. Seed 20260914에서 100개 모두 모든 접지 기준을 만족했습니다.
+
+평균·최대 절대 접지 위치는 0.4516 m와 0.9440 m, 수평 속도는 0.1476 m/s와 0.3526 m/s, 수직 속도는 0.7819 m/s와 0.7827 m/s였습니다. 평균·최대 자세는 0.7559도와 1.4386도, 각속도는 1.1004 deg/s와 2.4399 deg/s였습니다. 평균 연료 사용량은 53.0159 kg입니다. 관측된 최대 변화율은 throttle 초당 1.7784, gimbal 초당 60.0000도였습니다.
+
+~~~powershell
+python scripts/evaluate_integrated_control.py --episodes 100 --seed 20260914
+python scripts/run_episode.py --initial-state 10 100 0 -20 0 0 1000 --controller integrated-pid
+~~~
+
+이 제어기는 결정론적 무풍 기준선입니다. 외란 대응, 불확실성, 센서 잡음, 구동기 지연, gain 최적화와 하드웨어 안전은 이번 결과의 범위 밖입니다.
