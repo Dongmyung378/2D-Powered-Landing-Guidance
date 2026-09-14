@@ -48,6 +48,7 @@ def test_default_config_loads_and_uses_python_3127() -> None:
         "ki": 0.001,
         "kd": 0.01,
     }
+    assert config["horizontal_attitude_controller"]["outer_loop"]["max_tilt_deg"] == 15.0
 
 
 def test_config_rejects_initial_mass_below_dry_mass() -> None:
@@ -122,6 +123,29 @@ def test_config_rejects_inconsistent_model_contract(section, key, value, message
 def test_config_rejects_invalid_vertical_controller_settings(section, key, value, message) -> None:
     config = deepcopy(plg.load_config(DEFAULT_CONFIG))
     config["vertical_velocity_controller"][section][key] = value
+
+    with pytest.raises(plg.ConfigError, match=message):
+        plg.validate_config(config)
+
+
+@pytest.mark.parametrize(
+    ("section", "key", "value", "message"),
+    [
+        ("outer_loop", "max_tilt_deg", 46.0, "max_tilt_deg"),
+        ("inner_loop", "attitude_kp_s2", 0.0, "attitude_kp_s2"),
+        ("coupling", "compensate_vertical_thrust", 1, "compensate_vertical_thrust"),
+        ("evaluation", "x_m", [-4.0, 20.0], "x_m"),
+        ("evaluation", "theta_deg", [-16.0, 5.0], "theta_deg"),
+    ],
+)
+def test_config_rejects_invalid_horizontal_controller_settings(
+    section,
+    key,
+    value,
+    message,
+) -> None:
+    config = deepcopy(plg.load_config(DEFAULT_CONFIG))
+    config["horizontal_attitude_controller"][section][key] = value
 
     with pytest.raises(plg.ConfigError, match=message):
         plg.validate_config(config)

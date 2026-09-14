@@ -10,6 +10,7 @@ import pytest
 
 from powered_landing_guidance import load_config
 from powered_landing_guidance.controllers import (
+    HorizontalAttitudeController,
     SuicideBurnController,
     VerticalVelocityPIDController,
     VerticalVelocityProfile,
@@ -20,10 +21,79 @@ from powered_landing_guidance.controllers import (
 from powered_landing_guidance.dynamics import PlanarDynamicsParameters, simulate_planar
 from powered_landing_guidance.envs import RocketLandingEnv
 from powered_landing_guidance.model import State
+from scripts.evaluate_horizontal_control import (
+    evaluate_horizontal_control,
+    sample_horizontal_initial_states,
+)
 from scripts.sweep_velocity_gains import evaluate_gains, sample_vertical_initial_states
 
 CONFIG = load_config(Path(__file__).resolve().parents[1] / "configs/default.yaml")
 PARAMETERS = PlanarDynamicsParameters.from_config(CONFIG)
+
+
+def test_horizontal_controller_commands_tilt_toward_pad() -> None:
+    controller = HorizontalAttitudeController.from_config(CONFIG)
+    state = State(10.0, 100.0, 0.0, 0.0, 0.0, 0.0, 1000.0)
+    hover_throttle = state.mass * PARAMETERS.gravity_m_s2 / PARAMETERS.max_thrust_n
+
+    action = controller.command(state, base_throttle=hover_throttle)
+
+    assert controller.horizontal_acceleration_m_s2 < 0.0
+    assert controller.target_attitude_rad < 0.0
+    assert action[1] > 0.0
+
+
+def test_horizontal_controller_limits_tilt_and_gimbal() -> None:
+    controller = HorizontalAttitudeController.from_config(CONFIG)
+    controller.position_kp_s2 = 100.0
+    controller.max_horizontal_acceleration_m_s2 = 100.0
+    state = State(100.0, 100.0, 0.0, 0.0, 0.0, 0.0, 1000.0)
+    hover_throttle = state.mass * PARAMETERS.gravity_m_s2 / PARAMETERS.max_thrust_n
+
+    action = controller.command(state, base_throttle=hover_throttle)
+
+    assert controller.target_attitude_rad == pytest.approx(-controller.max_tilt_rad)
+    assert controller.tilt_limited
+    assert abs(action[1]) <= PARAMETERS.gimbal_limit_rad
+
+
+def test_horizontal_controller_compensates_vertical_thrust_loss() -> None:
+    controller = HorizontalAttitudeController.from_config(CONFIG)
+    state = State(8.0, 100.0, 0.0, 0.0, np.deg2rad(7.0), 0.0, 1000.0)
+    base_throttle = state.mass * PARAMETERS.gravity_m_s2 / PARAMETERS.max_thrust_n
+
+    action = controller.command(state, base_throttle=base_throttle)
+    vertical_throttle = action[0] * np.cos(state.theta + action[1])
+
+    assert vertical_throttle == pytest.approx(base_throttle, abs=1e-8)
+    assert action[0] >= base_throttle
+
+
+def test_horizontal_controller_handles_zero_throttle_without_invalid_gimbal() -> None:
+    controller = HorizontalAttitudeController.from_config(CONFIG)
+    state = State(10.0, 100.0, 0.0, 0.0, 0.0, 0.0, 1000.0)
+
+    action = controller.command(state, base_throttle=0.0)
+
+    np.testing.assert_array_equal(action, [0.0, 0.0])
+    assert controller.gimbal_limited
+
+
+def test_horizontal_evaluation_is_reproducible_and_converges_toward_pad() -> None:
+    first = sample_horizontal_initial_states(CONFIG, episodes=20, seed=20260914)
+    second = sample_horizontal_initial_states(CONFIG, episodes=20, seed=20260914)
+
+    np.testing.assert_array_equal(first, second)
+    result = evaluate_horizontal_control(CONFIG, first)
+
+    assert result.completed_episodes == result.episodes
+    assert result.converged_episodes == result.episodes
+    assert result.mean_final_abs_error_m < result.mean_initial_abs_error_m
+    assert (
+        result.max_target_tilt_deg
+        <= CONFIG["horizontal_attitude_controller"]["outer_loop"]["max_tilt_deg"]
+    )
+    assert result.max_gimbal_deg <= CONFIG["vehicle"]["gimbal_limit_deg"]
 
 
 def test_vertical_velocity_profile_slows_descent_near_ground() -> None:

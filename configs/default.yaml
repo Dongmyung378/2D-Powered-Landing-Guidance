@@ -85,3 +85,25 @@ vertical_velocity_controller:
     kp: [0.04, 0.06, 0.08]
     ki: [0.0, 0.001]
     kd: [0.0, 0.01]
+
+horizontal_attitude_controller:
+  target_x_m: 0.0
+  outer_loop:
+    position_kp_s2: 0.05
+    velocity_kd_s: 0.45
+    max_horizontal_acceleration_m_s2: 2.5
+    max_tilt_deg: 15.0
+  inner_loop:
+    attitude_kp_s2: 4.0
+    angular_rate_kd_s: 3.0
+  coupling:
+    compensate_vertical_thrust: true
+  evaluation:
+    duration_s: 8.0
+    altitude_m: 100.0
+    min_abs_x_m: 5.0
+    x_m: [-20.0, 20.0]
+    vx_m_s: [-2.0, 2.0]
+    theta_deg: [-5.0, 5.0]
+    omega_deg_s: [-2.0, 2.0]
+    mass_kg: [950.0, 1000.0]

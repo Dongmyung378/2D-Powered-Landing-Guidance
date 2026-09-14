@@ -199,6 +199,167 @@ class VerticalVelocityPIDController:
         return np.asarray((throttle, 0.0), dtype=np.float64)
 
 
+@dataclass(slots=True)
+class HorizontalAttitudeController:
+    """Drive horizontal error toward a target with cascaded position and attitude loops."""
+
+    parameters: PlanarDynamicsParameters
+    target_x_m: float
+    position_kp_s2: float
+    velocity_kd_s: float
+    max_horizontal_acceleration_m_s2: float
+    max_tilt_rad: float
+    attitude_kp_s2: float
+    angular_rate_kd_s: float
+    compensate_vertical_thrust: bool = True
+    horizontal_acceleration_m_s2: float | None = field(init=False, default=None)
+    target_attitude_rad: float | None = field(init=False, default=None)
+    desired_angular_acceleration_rad_s2: float | None = field(init=False, default=None)
+    uncompensated_throttle: float | None = field(init=False, default=None)
+    throttle: float | None = field(init=False, default=None)
+    gimbal_angle_rad: float | None = field(init=False, default=None)
+    tilt_limited: bool = field(init=False, default=False)
+    gimbal_limited: bool = field(init=False, default=False)
+    throttle_limited: bool = field(init=False, default=False)
+
+    def __post_init__(self) -> None:
+        self.target_x_m = float(self.target_x_m)
+        if not np.isfinite(self.target_x_m):
+            raise ValueError("target_x_m must be finite")
+        self.position_kp_s2 = _nonnegative(self.position_kp_s2, "position_kp_s2")
+        self.velocity_kd_s = _nonnegative(self.velocity_kd_s, "velocity_kd_s")
+        self.max_horizontal_acceleration_m_s2 = _positive(
+            self.max_horizontal_acceleration_m_s2,
+            "max_horizontal_acceleration_m_s2",
+        )
+        self.max_tilt_rad = _positive(self.max_tilt_rad, "max_tilt_rad")
+        if self.max_tilt_rad >= np.pi / 2.0:
+            raise ValueError("max_tilt_rad must be less than pi / 2")
+        self.attitude_kp_s2 = _positive(self.attitude_kp_s2, "attitude_kp_s2")
+        self.angular_rate_kd_s = _nonnegative(
+            self.angular_rate_kd_s,
+            "angular_rate_kd_s",
+        )
+        if not isinstance(self.compensate_vertical_thrust, bool):
+            raise ValueError("compensate_vertical_thrust must be boolean")
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> HorizontalAttitudeController:
+        """Build the cascaded controller from the shared project configuration."""
+        settings = config["horizontal_attitude_controller"]
+        outer = settings["outer_loop"]
+        inner = settings["inner_loop"]
+        return cls(
+            parameters=PlanarDynamicsParameters.from_config(config),
+            target_x_m=float(settings["target_x_m"]),
+            position_kp_s2=float(outer["position_kp_s2"]),
+            velocity_kd_s=float(outer["velocity_kd_s"]),
+            max_horizontal_acceleration_m_s2=float(outer["max_horizontal_acceleration_m_s2"]),
+            max_tilt_rad=float(np.deg2rad(outer["max_tilt_deg"])),
+            attitude_kp_s2=float(inner["attitude_kp_s2"]),
+            angular_rate_kd_s=float(inner["angular_rate_kd_s"]),
+            compensate_vertical_thrust=bool(settings["coupling"]["compensate_vertical_thrust"]),
+        )
+
+    def reset(self) -> None:
+        """Clear telemetry retained from the previous command."""
+        self.horizontal_acceleration_m_s2 = None
+        self.target_attitude_rad = None
+        self.desired_angular_acceleration_rad_s2 = None
+        self.uncompensated_throttle = None
+        self.throttle = None
+        self.gimbal_angle_rad = None
+        self.tilt_limited = False
+        self.gimbal_limited = False
+        self.throttle_limited = False
+
+    def _gimbal_for_angular_acceleration(
+        self,
+        desired_angular_acceleration_rad_s2: float,
+        throttle: float,
+    ) -> tuple[float, bool]:
+        thrust_n = throttle * self.parameters.max_thrust_n
+        if thrust_n <= 0.0:
+            return 0.0, not np.isclose(desired_angular_acceleration_rad_s2, 0.0)
+        sine_command = (
+            -desired_angular_acceleration_rad_s2
+            * self.parameters.moment_of_inertia_kg_m2
+            / (self.parameters.engine_lever_arm_m * thrust_n)
+        )
+        force_limited = abs(sine_command) > 1.0
+        raw_gimbal = float(np.arcsin(np.clip(sine_command, -1.0, 1.0)))
+        gimbal = float(
+            np.clip(
+                raw_gimbal,
+                -self.parameters.gimbal_limit_rad,
+                self.parameters.gimbal_limit_rad,
+            )
+        )
+        return gimbal, force_limited or not np.isclose(gimbal, raw_gimbal, atol=1e-12)
+
+    def command(
+        self,
+        state: State | ArrayLike,
+        *,
+        base_throttle: float,
+    ) -> NDArray[np.float64]:
+        """Return throttle and gimbal commands while preserving requested vertical thrust."""
+        current = state if isinstance(state, State) else State.from_array(state)
+        base = float(base_throttle)
+        minimum = self.parameters.throttle_min
+        maximum = self.parameters.throttle_max
+        if not np.isfinite(base) or not minimum <= base <= maximum:
+            raise ValueError("base_throttle must be finite and within actuator limits")
+
+        raw_acceleration = (
+            self.position_kp_s2 * (self.target_x_m - current.x) - self.velocity_kd_s * current.vx
+        )
+        acceleration = float(
+            np.clip(
+                raw_acceleration,
+                -self.max_horizontal_acceleration_m_s2,
+                self.max_horizontal_acceleration_m_s2,
+            )
+        )
+        raw_target_attitude = float(np.arctan2(acceleration, self.parameters.gravity_m_s2))
+        target_attitude = float(np.clip(raw_target_attitude, -self.max_tilt_rad, self.max_tilt_rad))
+        desired_angular_acceleration = (
+            self.attitude_kp_s2 * (target_attitude - current.theta)
+            - self.angular_rate_kd_s * current.omega
+        )
+
+        throttle = base
+        gimbal, gimbal_limited = self._gimbal_for_angular_acceleration(
+            desired_angular_acceleration,
+            throttle,
+        )
+        if self.compensate_vertical_thrust and base > 0.0:
+            for _ in range(8):
+                vertical_fraction = max(float(np.cos(current.theta + gimbal)), 1e-9)
+                throttle = float(np.clip(base / vertical_fraction, minimum, maximum))
+                gimbal, gimbal_limited = self._gimbal_for_angular_acceleration(
+                    desired_angular_acceleration,
+                    throttle,
+                )
+
+        self.horizontal_acceleration_m_s2 = acceleration
+        self.target_attitude_rad = target_attitude
+        self.desired_angular_acceleration_rad_s2 = float(desired_angular_acceleration)
+        self.uncompensated_throttle = base
+        self.throttle = throttle
+        self.gimbal_angle_rad = gimbal
+        self.tilt_limited = not np.isclose(target_attitude, raw_target_attitude, atol=1e-12)
+        self.gimbal_limited = gimbal_limited
+        self.throttle_limited = not np.isclose(
+            throttle,
+            base / max(float(np.cos(current.theta + gimbal)), 1e-9)
+            if self.compensate_vertical_thrust and base > 0.0
+            else base,
+            atol=1e-12,
+        )
+        return np.asarray((throttle, gimbal), dtype=np.float64)
+
+
 def estimate_suicide_burn(
     state: State | ArrayLike,
     parameters: PlanarDynamicsParameters,

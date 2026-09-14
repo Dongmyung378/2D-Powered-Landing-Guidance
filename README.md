@@ -12,10 +12,28 @@ A reproducible 2D reusable-rocket powered-landing project that progresses from r
 | Model | Planar 3-DoF with variable mass |
 | State | x, z, vx, vz, theta, omega, mass |
 | Action | throttle, gimbal angle |
-| Current controllers | Suicide-burn and vertical-velocity PID |
+| Current controllers | Suicide-burn, vertical-velocity PID, and horizontal-attitude control |
 | Runtime | Python 3.12.7 |
 
-The repository currently provides a tested simulation environment and two non-learning vertical landing baselines. Horizontal and attitude control, optimal control, Behavior Cloning, DAgger, disturbances, and Monte Carlo evaluation are scheduled for later roadmap stages.
+The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, and cascaded horizontal-position and attitude control. Full vertical-horizontal landing integration, optimal control, Behavior Cloning, DAgger, disturbances, and Monte Carlo evaluation remain later roadmap stages.
+
+## Horizontal-attitude control benchmark
+
+The horizontal controller converts position and velocity error into a bounded target tilt, then uses attitude PD control to generate the gimbal command. It compensates throttle for the vertical component lost while the thrust vector is tilted. The configured limits are 2.5 m/s² horizontal acceleration, 15 degrees target tilt, and the vehicle's 15-degree gimbal limit.
+
+A fixed batch of 100 wind-free initial conditions used 5 to 20 m horizontal offsets, -2 to 2 m/s horizontal velocity, -5 to 5 degrees attitude, -2 to 2 deg/s angular rate, and 950 to 1000 kg mass. Each trial held altitude near 100 m for 8 seconds so horizontal and attitude behavior could be isolated from the vertical landing controller.
+
+| Metric | Result |
+|---|---:|
+| Trials completed | 100 / 100 |
+| Trials converging toward the pad | 100 / 100 |
+| Mean initial absolute position error | 12.4712 m |
+| Mean final absolute position error | 5.4894 m |
+| Maximum target tilt | 9.7647 degrees |
+| Maximum gimbal command | 7.0393 degrees |
+| Maximum altitude deviation | 0.0149 m |
+
+This benchmark satisfies pad-direction convergence in wind-free conditions. It is not yet a complete landing because the horizontal and vertical controllers are intentionally kept separate until the integration stage.
 
 ## Vertical-velocity PID benchmark
 
@@ -130,6 +148,14 @@ python scripts/sweep_velocity_gains.py --episodes 100 --seed 20260910
 
 The sweep reports success rate, touchdown-speed statistics, and mean fuel use. Pass explicit `--kp`, `--ki`, and `--kd` lists to test a different grid.
 
+Run the reproducible horizontal-attitude benchmark:
+
+~~~powershell
+python scripts/evaluate_horizontal_control.py --episodes 100 --seed 20260914
+~~~
+
+This check reports pad-direction convergence, position-error reduction, tilt and gimbal peaks, and altitude deviation while compensating for vertical thrust loss.
+
 ## Suicide-burn calculation
 
 For the first reference estimate, mass is held constant during the burn:
@@ -151,6 +177,19 @@ throttle = saturate(feed_forward + Kp * error + Ki * integral + Kd * error_rate)
 ~~~
 
 The integral term is clamped and stops accumulating when its error would push an already saturated command farther outside the actuator range.
+
+## Horizontal-position and attitude loops
+
+The outer loop maps horizontal position and velocity error to a target horizontal acceleration and bounded target attitude. The inner loop uses attitude error and angular rate to request angular acceleration, then inverts the thrust-torque equation to obtain gimbal angle.
+
+~~~text
+target_ax = clip(Kp_x * (target_x - x) - Kd_x * vx)
+target_theta = clip(atan2(target_ax, gravity), max_tilt)
+target_alpha = Kp_theta * (target_theta - theta) - Kd_theta * omega
+gimbal = clip(asin(-target_alpha * inertia / (lever_arm * thrust)))
+~~~
+
+When enabled, coupling compensation divides the requested base throttle by `cos(theta + gimbal)`. Throttle and gimbal remain subject to actuator limits. A zero-thrust command safely returns zero gimbal because no attitude torque is available.
 
 ## Repository structure
 
@@ -179,7 +218,7 @@ The tracked repository contains only source code, reproducible configuration, te
 ## Current limitations
 
 - Terminal powered descent only; launch, ascent, boost-back, and reentry are out of scope.
-- The current controllers are vertical-only and do not correct horizontal position or attitude.
+- Horizontal and vertical control have been validated separately but are not yet integrated into one touchdown controller.
 - Aerodynamic drag, wind, sensor noise, thrust error, and engine delay are not active yet.
 - Ground contact uses a point model without landing-leg or structural-impact dynamics.
 - The 2 m/s success threshold is a simulation criterion, not a hardware safety guarantee.

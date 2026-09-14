@@ -265,3 +265,36 @@ python scripts/sweep_velocity_gains.py --episodes 100 --seed 20260910
 ~~~
 
 These results apply only to the current deterministic, vertical, wind-free simulation range. Horizontal and attitude control, wind, model error, sensor noise, and actuator delay remain outside this baseline.
+
+## 16. Horizontal-position and attitude controller
+
+`HorizontalAttitudeController` is a cascaded, non-learning controller. It accepts the current state and a base throttle from a separate vertical controller. This interface keeps horizontal-attitude logic independent until the integrated-controller stage.
+
+The outer loop calculates horizontal acceleration from position and velocity error:
+
+~~~text
+raw_ax = Kp_x * (target_x - x) - Kd_x * vx
+target_ax = clip(raw_ax, -max_ax, max_ax)
+target_theta = clip(atan2(target_ax, gravity), -max_tilt, max_tilt)
+~~~
+
+The default outer-loop gains are `Kp_x=0.05 s^-2` and `Kd_x=0.45 s^-1`. Horizontal acceleration is limited to 2.5 m/s² and target tilt to 15 degrees.
+
+The inner loop calculates desired angular acceleration and inverts the documented torque convention. Positive gimbal produces negative angular acceleration:
+
+~~~text
+target_alpha = Kp_theta * (target_theta - theta) - Kd_theta * omega
+sin(gimbal) = -target_alpha * inertia / (lever_arm * thrust)
+~~~
+
+The default inner-loop gains are `Kp_theta=4.0 s^-2` and `Kd_theta=3.0 s^-1`. The inverse is clipped to its mathematical domain and then to the 15-degree vehicle gimbal limit. If base throttle is zero, gimbal is zero because thrust vectoring cannot produce torque.
+
+Tilting reduces vertical thrust by `cos(theta + gimbal)`. With coupling compensation enabled, the output throttle is iteratively adjusted so its vertical component matches the requested base throttle, subject to the 0 to 1 actuator range.
+
+The reproducible evaluation uses 100 wind-free, fixed-duration hover trials at 100 m. Initial horizontal error is at least 5 m within -20 to 20 m; horizontal speed, attitude, angular rate, and mass are sampled from the configured ranges. With seed 20260914, all 100 trials completed and reduced absolute horizontal error. Mean error fell from 12.4712 m to 5.4894 m. Maximum target tilt was 9.7647 degrees, maximum gimbal was 7.0393 degrees, and maximum altitude deviation was 0.0149 m.
+
+~~~powershell
+python scripts/evaluate_horizontal_control.py --episodes 100 --seed 20260914
+~~~
+
+This result establishes wind-free convergence toward the pad. It does not claim touchdown success; vertical-throttle and horizontal-gimbal commands remain separate until the integrated-controller stage.

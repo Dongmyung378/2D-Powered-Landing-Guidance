@@ -67,6 +67,7 @@ def validate_config(config: Config) -> None:
     initial_state = _mapping(config, "initial_state")
     landing = _mapping(config, "landing_success")
     velocity_controller = _mapping(config, "vertical_velocity_controller")
+    horizontal_controller = _mapping(config, "horizontal_attitude_controller")
 
     if str(project.get("python_version")) != "3.12.7":
         raise ConfigError("project.python_version must be '3.12.7'")
@@ -182,6 +183,41 @@ def validate_config(config: Config) -> None:
                 or value < 0
             ):
                 raise ConfigError(f"gain_sweep.{key} must contain nonnegative finite numbers")
+
+    target_x = _finite(horizontal_controller, "target_x_m")
+    outer_loop = _mapping(horizontal_controller, "outer_loop")
+    _nonnegative(outer_loop, "position_kp_s2")
+    _nonnegative(outer_loop, "velocity_kd_s")
+    _positive(outer_loop, "max_horizontal_acceleration_m_s2")
+    max_tilt_deg = _positive(outer_loop, "max_tilt_deg")
+    if max_tilt_deg > 45.0:
+        raise ConfigError("outer_loop.max_tilt_deg cannot exceed 45")
+
+    inner_loop = _mapping(horizontal_controller, "inner_loop")
+    _positive(inner_loop, "attitude_kp_s2")
+    _nonnegative(inner_loop, "angular_rate_kd_s")
+
+    coupling = _mapping(horizontal_controller, "coupling")
+    if not isinstance(coupling.get("compensate_vertical_thrust"), bool):
+        raise ConfigError("coupling.compensate_vertical_thrust must be boolean")
+
+    horizontal_evaluation = _mapping(horizontal_controller, "evaluation")
+    _positive(horizontal_evaluation, "duration_s")
+    altitude = _finite(horizontal_evaluation, "altitude_m")
+    min_abs_x = _positive(horizontal_evaluation, "min_abs_x_m")
+    x_range = _range(horizontal_evaluation, "x_m")
+    _range(horizontal_evaluation, "vx_m_s")
+    theta_range = _range(horizontal_evaluation, "theta_deg")
+    _range(horizontal_evaluation, "omega_deg_s")
+    horizontal_mass_range = _range(horizontal_evaluation, "mass_kg")
+    if altitude <= ground:
+        raise ConfigError("horizontal evaluation altitude must be above ground")
+    if x_range[0] > target_x - min_abs_x or x_range[1] < target_x + min_abs_x:
+        raise ConfigError("horizontal evaluation x_m must cover both sides of min_abs_x_m")
+    if max(abs(theta_range[0]), abs(theta_range[1])) > max_tilt_deg:
+        raise ConfigError("horizontal evaluation theta_deg cannot exceed max_tilt_deg")
+    if horizontal_mass_range[0] < dry_mass:
+        raise ConfigError("horizontal evaluation mass_kg cannot extend below dry mass")
 
 
 def load_config(path: str | Path) -> Config:

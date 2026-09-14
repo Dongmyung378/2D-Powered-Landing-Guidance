@@ -267,3 +267,36 @@ python scripts/sweep_velocity_gains.py --episodes 100 --seed 20260910
 ~~~
 
 이 결과는 현재 설정 범위의 결정론적 수직·무풍 시뮬레이션에 한정됩니다. 수평 위치와 자세 제어는 현재 범위 밖이며 바람, 모델 오차, 센서 잡음과 구동기 지연은 이후 강건성 단계에서 평가합니다.
+
+## 수평 위치·자세 제어기
+
+`HorizontalAttitudeController`는 학습을 사용하지 않는 직렬 제어기입니다. 현재 상태와 별도 수직 제어기가 계산한 기본 throttle을 입력받습니다. 이 인터페이스로 수평·자세 로직을 통합 제어기 단계 전까지 독립적으로 유지합니다.
+
+외부 루프는 위치와 속도 오차로 수평 가속도를 계산합니다.
+
+~~~text
+raw_ax = Kp_x * (target_x - x) - Kd_x * vx
+target_ax = clip(raw_ax, -max_ax, max_ax)
+target_theta = clip(atan2(target_ax, gravity), -max_tilt, max_tilt)
+~~~
+
+기본 외부 루프 이득은 `Kp_x=0.05 s^-2`, `Kd_x=0.45 s^-1`입니다. 수평 가속도는 2.5 m/s², 목표 기울기는 15도로 제한합니다.
+
+내부 루프는 목표 각가속도를 계산하고 문서의 토크 부호 규약을 역으로 풉니다. 양의 gimbal은 음의 각가속도를 만듭니다.
+
+~~~text
+target_alpha = Kp_theta * (target_theta - theta) - Kd_theta * omega
+sin(gimbal) = -target_alpha * inertia / (lever_arm * thrust)
+~~~
+
+기본 내부 루프 이득은 `Kp_theta=4.0 s^-2`, `Kd_theta=3.0 s^-1`입니다. 역계산 값은 삼각함수 정의역과 기체의 15도 gimbal 제한에 맞춰 자릅니다. 기본 throttle이 0이면 추력 편향으로 토크를 만들 수 없으므로 gimbal은 0입니다.
+
+기울어진 추력의 수직 성분은 `cos(theta + gimbal)`만큼 줄어듭니다. Coupling 보상을 켜면 출력 throttle의 수직 성분이 요청된 기본 throttle과 같아지도록 반복 계산하며, 최종 출력에는 0-1 구동기 제한을 적용합니다.
+
+재현 실험은 고도 100 m의 무풍 조건에서 100개 초기조건을 각각 8초 동안 실행합니다. 초기 수평 오차는 -20~20 m 범위에서 최소 5 m이며 수평 속도, 자세, 각속도와 질량은 설정 범위에서 표본화합니다. Seed 20260914에서 100개 모두 정상 완료했고 절대 수평 오차가 감소했습니다. 평균 오차는 12.4712 m에서 5.4894 m로 줄었고 최대 목표 기울기는 9.7647도, 최대 gimbal은 7.0393도, 최대 고도 편차는 0.0149 m였습니다.
+
+~~~powershell
+python scripts/evaluate_horizontal_control.py --episodes 100 --seed 20260914
+~~~
+
+이 결과는 무풍에서 착륙장 방향으로 수렴함을 검증합니다. 아직 접지 성공을 의미하지 않으며 수직 throttle과 수평 gimbal 명령은 통합 제어기 단계 전까지 분리되어 있습니다.
