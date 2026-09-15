@@ -413,3 +413,32 @@ python scripts/evaluate_pid_disturbances.py --report artifacts/disturbances.json
 ~~~
 
 JSON에는 모든 강도의 결과 분포, 최종 상태 오차, 정규화 오차와 연료 사용량이 들어갑니다. PNG에는 안전 착륙 성공률 곡선 다섯 개, 95% 기준과 측정한 붕괴 강도가 표시됩니다. 기존 파일은 덮어쓰지 않습니다.
+
+## 동결된 2주차 기준선 protocol
+
+`configs/pid-baseline-v1.yaml`은 이후 모든 방법이 사용할 비교 기준입니다. 12일차에서 선택한 배율을 통합 제어기 값에 직접 반영했습니다. 접근 phase의 위치 gain, 속도 gain과 profile 감속도는 `0.55`, `1.615`, `1.65 m/s^2`이고, 말기 phase 값은 `0.33`, `1.2825`, `1.1 m/s^2`입니다. 이 제어기 mapping의 동결 digest는 `80d4cbedbc545457072dc08f308ee408fd25996e3df500520135ec0452818a8a`입니다.
+
+고정 평가 집합은 sampler `integrated_uniform_v1`, 1,000 episode와 seed 20260914를 사용합니다. 수평 위치의 부호와 크기를 따로 추출해 모든 초기상태가 목표에서 3 m 이상 떨어지도록 하고, 나머지 여섯 상태 성분은 통합 제어기 평가 설정의 범위에서 서로 독립적으로 추출합니다. 각도는 hash 계산과 simulation 전에 radian으로 변환합니다.
+
+`initial_condition_sha256`은 schema prefix, little-endian unsigned 64-bit 정수로 표현한 행렬 크기 두 개, 연속된 little-endian IEEE 754 float64 상태 행렬을 순서대로 hash합니다. 기대 digest는 `a9593a383acc0017738ed383a123ca743a32bce46c64d249b08ca577a448a952`입니다. `frozen_baseline_initial_states`는 행렬을 다시 생성한 뒤 제어기와 상태 digest를 모두 검증합니다. 반환 행렬은 읽기 전용이며 제어기 수정, seed·범위 변경, sampler 변경 또는 episode 수 변경을 거부합니다.
+
+명목 평가 결과는 다음과 같습니다.
+
+| 평가 항목 | 결과 |
+|---|---:|
+| 안전 착륙 | 999 / 1,000 (99.9%) |
+| Crash | 1 / 1,000 |
+| 평균 / 최대 절대 접지 x | 0.4098 / 1.3494 m |
+| 평균 / 최대 절대 접지 vx | 0.1656 / 0.5915 m/s |
+| 평균 / 95백분위 / 최대 절대 접지 vz | 0.7802 / 0.7810 / 0.7814 m/s |
+| 평균 / 최대 절대 접지 자세 | 0.5991 / 3.2498 deg |
+| 평균 / 최대 절대 접지 각속도 | 1.3178 / 3.6500 deg/s |
+| 평균 연료 사용량 | 51.4460 kg |
+
+성공률 99.9%로 설정된 2주차 통과 기준 70%를 만족했습니다. 한 번의 crash는 수평 위치 제한 1 m를 초과해 발생했으며, 수평 속도·수직 속도·자세·각속도의 최대값은 각 접지 제한 안에 있었습니다. 이 유한 simulation 결과는 모든 상황의 강건성을 보장하지 않습니다.
+
+~~~powershell
+python scripts/evaluate_frozen_baseline.py --output-dir artifacts/week2-baseline
+~~~
+
+이 명령은 JSON 평가 보고서, 재생 가능한 episode log 두 개와 GIF 두 개를 생성합니다. 대표 성공은 초기조건 0번의 무풍 결과입니다. 대표 실패는 같은 0번 초기조건에 40 m/s 일정 수평 바람을 적용하며, 접지 위치 오차 2.5911 m로 crash가 발생합니다. 이 스트레스 사례는 알려진 실패 양상을 보여주기 위한 것이며 명목 성공률에는 포함하지 않습니다. 실행 전 모든 대상 파일을 확인하고 기존 출력은 덮어쓰지 않습니다.

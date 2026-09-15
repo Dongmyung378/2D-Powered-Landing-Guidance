@@ -57,6 +57,17 @@ def test_default_config_loads_and_uses_python_3127() -> None:
     )
 
 
+def test_frozen_pid_baseline_protocol_loads() -> None:
+    config = plg.load_config(ROOT / "configs/pid-baseline-v1.yaml")
+    protocol = config["baseline_protocol"]
+
+    assert protocol["id"] == "pid-baseline-v1"
+    assert protocol["controller"] == "integrated-pid"
+    assert protocol["frozen"] is True
+    assert protocol["initial_conditions"]["episodes"] == 1000
+    assert protocol["acceptance"]["minimum_success_rate"] == 0.70
+
+
 def test_config_rejects_initial_mass_below_dry_mass() -> None:
     config = deepcopy(plg.load_config(DEFAULT_CONFIG))
     config["initial_state"]["mass_kg"] = config["vehicle"]["dry_mass_kg"] - 1.0
@@ -241,6 +252,33 @@ def test_config_rejects_tuning_data_leakage_and_empty_secondary_objective() -> N
 def test_config_rejects_invalid_disturbance_settings(path, value, message) -> None:
     config = deepcopy(plg.load_config(DEFAULT_CONFIG))
     target = config["disturbance_evaluation"]
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+
+    with pytest.raises(plg.ConfigError, match=message):
+        plg.validate_config(config)
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("frozen",), False, "frozen"),
+        (("controller_sha256",), "not-a-hash", "controller_sha256"),
+        (("initial_conditions", "episodes"), 0, "episodes"),
+        (("initial_conditions", "sampler"), "changed", "sampler"),
+        (("acceptance", "minimum_success_rate"), 1.1, "minimum_success_rate"),
+        (
+            ("representative_cases", "success_initial_condition_index"),
+            1000,
+            "case index",
+        ),
+        (("representative_cases", "failure", "horizontal_wind_m_s"), 0.0, "failure wind"),
+    ],
+)
+def test_config_rejects_invalid_frozen_baseline_protocol(path, value, message) -> None:
+    config = deepcopy(plg.load_config(ROOT / "configs/pid-baseline-v1.yaml"))
+    target = config["baseline_protocol"]
     for key in path[:-1]:
         target = target[key]
     target[path[-1]] = value

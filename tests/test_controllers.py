@@ -10,7 +10,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from powered_landing_guidance import load_config
+from powered_landing_guidance import (
+    frozen_baseline_initial_states,
+    initial_condition_sha256,
+    integrated_controller_sha256,
+    load_config,
+)
 from powered_landing_guidance.controllers import (
     HorizontalAttitudeController,
     IntegratedLandingController,
@@ -24,6 +29,11 @@ from powered_landing_guidance.controllers import (
 from powered_landing_guidance.dynamics import PlanarDynamicsParameters, simulate_planar
 from powered_landing_guidance.envs import RocketLandingEnv
 from powered_landing_guidance.model import State
+from scripts.evaluate_frozen_baseline import (
+    baseline_artifact_paths,
+    ensure_artifact_paths_available,
+    representative_episodes,
+)
 from scripts.evaluate_horizontal_control import (
     evaluate_horizontal_control,
     sample_horizontal_initial_states,
@@ -49,7 +59,9 @@ from scripts.tune_integrated_controller import (
     tune_controller,
 )
 
-CONFIG = load_config(Path(__file__).resolve().parents[1] / "configs/default.yaml")
+ROOT = Path(__file__).resolve().parents[1]
+CONFIG = load_config(ROOT / "configs/default.yaml")
+FROZEN_CONFIG = load_config(ROOT / "configs/pid-baseline-v1.yaml")
 PARAMETERS = PlanarDynamicsParameters.from_config(CONFIG)
 
 
@@ -183,6 +195,58 @@ def test_integrated_evaluation_is_reproducible_and_lands_safely() -> None:
         result.max_gimbal_slew_deg_s
         <= CONFIG["integrated_landing_controller"]["slew_rates"]["gimbal_deg_s"] + 1e-10
     )
+
+
+def test_frozen_baseline_recreates_exact_controller_and_initial_conditions() -> None:
+    protocol = FROZEN_CONFIG["baseline_protocol"]
+    first = frozen_baseline_initial_states(FROZEN_CONFIG)
+    second = frozen_baseline_initial_states(FROZEN_CONFIG)
+
+    np.testing.assert_array_equal(first, second)
+    assert first.shape == (1000, 7)
+    assert not first.flags.writeable
+    assert initial_condition_sha256(first) == protocol["initial_conditions"]["sha256"]
+    assert integrated_controller_sha256(FROZEN_CONFIG) == protocol["controller_sha256"]
+    approach = FROZEN_CONFIG["integrated_landing_controller"]["phases"]["approach"]
+    terminal = FROZEN_CONFIG["integrated_landing_controller"]["phases"]["terminal"]
+    assert approach["horizontal_outer_loop"]["position_kp_s2"] == 0.55
+    assert approach["horizontal_outer_loop"]["velocity_kd_s"] == 1.615
+    assert approach["vertical_profile"]["deceleration_m_s2"] == 1.65
+    assert terminal["horizontal_outer_loop"]["position_kp_s2"] == 0.33
+    assert terminal["horizontal_outer_loop"]["velocity_kd_s"] == 1.2825
+    assert terminal["vertical_profile"]["deceleration_m_s2"] == 1.1
+
+
+def test_frozen_baseline_rejects_controller_or_initial_condition_drift() -> None:
+    changed_controller = deepcopy(FROZEN_CONFIG)
+    changed_controller["integrated_landing_controller"]["phases"]["approach"]["vertical_gains"][
+        "kp"
+    ] += 0.001
+    with pytest.raises(ValueError, match="controller settings have changed"):
+        frozen_baseline_initial_states(changed_controller)
+
+    changed_seed = deepcopy(FROZEN_CONFIG)
+    changed_seed["baseline_protocol"]["initial_conditions"]["seed"] += 1
+    with pytest.raises(ValueError, match="initial-condition set"):
+        frozen_baseline_initial_states(changed_seed)
+
+
+def test_representative_baseline_cases_reproduce_success_and_stress_failure() -> None:
+    states = frozen_baseline_initial_states(FROZEN_CONFIG)
+    success, failure = representative_episodes(FROZEN_CONFIG, states)
+
+    assert success["outcome"] == "success"
+    assert success["config"]["environment"]["horizontal_wind_m_s"] == 0.0
+    assert failure["outcome"] == "crash"
+    assert failure["config"]["environment"]["horizontal_wind_m_s"] == 40.0
+
+
+def test_frozen_baseline_refuses_existing_output_before_evaluation(tmp_path) -> None:
+    destinations = baseline_artifact_paths(tmp_path)
+    destinations["report"].write_text("existing", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="refusing to overwrite"):
+        ensure_artifact_paths_available(destinations)
 
 
 def test_tuning_candidate_generation_is_reproducible() -> None:

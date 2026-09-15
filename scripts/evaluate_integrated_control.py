@@ -13,6 +13,7 @@ from numpy.typing import NDArray
 
 from powered_landing_guidance import IntegratedLandingController, load_config
 from powered_landing_guidance.envs import RocketLandingEnv
+from powered_landing_guidance.evaluation import sample_integrated_initial_states
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,35 +41,6 @@ class IntegratedControlResult:
     slew_limited_updates: int
     max_throttle_slew_per_s: float
     max_gimbal_slew_deg_s: float
-
-
-def sample_integrated_initial_states(
-    config: dict,
-    episodes: int,
-    seed: int,
-) -> NDArray[np.float64]:
-    """Sample a reproducible medium-difficulty batch from configured ranges."""
-    if episodes <= 0:
-        raise ValueError("episodes must be positive")
-    settings = config["integrated_landing_controller"]
-    ranges = settings["evaluation"]
-    target_x = float(settings["target_x_m"])
-    low_x, high_x = (float(value) for value in ranges["x_m"])
-    min_abs_x = float(ranges["min_abs_x_m"])
-    rng = np.random.default_rng(seed)
-    signs = rng.choice(np.asarray((-1.0, 1.0)), size=episodes)
-    negative_x = rng.uniform(low_x, target_x - min_abs_x, size=episodes)
-    positive_x = rng.uniform(target_x + min_abs_x, high_x, size=episodes)
-
-    states = np.empty((episodes, 7), dtype=np.float64)
-    states[:, 0] = np.where(signs < 0.0, negative_x, positive_x)
-    states[:, 1] = rng.uniform(*ranges["z_m"], size=episodes)
-    states[:, 2] = rng.uniform(*ranges["vx_m_s"], size=episodes)
-    states[:, 3] = rng.uniform(*ranges["vz_m_s"], size=episodes)
-    states[:, 4] = np.deg2rad(rng.uniform(*ranges["theta_deg"], size=episodes))
-    states[:, 5] = np.deg2rad(rng.uniform(*ranges["omega_deg_s"], size=episodes))
-    states[:, 6] = rng.uniform(*ranges["mass_kg"], size=episodes)
-    return states
 
 
 def evaluate_integrated_control(

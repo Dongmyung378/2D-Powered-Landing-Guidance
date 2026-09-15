@@ -410,3 +410,32 @@ python scripts/evaluate_pid_disturbances.py --report artifacts/disturbances.json
 ~~~
 
 The JSON contains every level's outcome counts, terminal-state errors, normalized error, and propellant use. The PNG contains five safe-landing-rate curves, the 95% threshold, and the detected collapse strength. Existing files are never overwritten.
+
+## 20. Frozen Week 2 baseline protocol
+
+`configs/pid-baseline-v1.yaml` is the comparison baseline for all later methods. It materializes the Day 12 selected scales in the integrated-controller values. The approach-phase position gain, velocity gain, and profile deceleration are `0.55`, `1.615`, and `1.65 m/s^2`; the terminal values are `0.33`, `1.2825`, and `1.1 m/s^2`. The controller mapping has the frozen digest `80d4cbedbc545457072dc08f308ee408fd25996e3df500520135ec0452818a8a`.
+
+The fixed evaluation set uses sampler `integrated_uniform_v1`, 1,000 episodes, and seed 20260914. The sampler draws the sign and magnitude of horizontal position separately so every state begins at least 3 m from the target. It then draws the remaining six state components independently from the ranges in the integrated-controller evaluation configuration. Angles are converted to radians before hashing or simulation.
+
+`initial_condition_sha256` hashes a schema prefix, the two matrix dimensions as little-endian unsigned 64-bit integers, and the contiguous state matrix as little-endian IEEE 754 float64 values. The expected digest is `a9593a383acc0017738ed383a123ca743a32bce46c64d249b08ca577a448a952`. `frozen_baseline_initial_states` regenerates the matrix and verifies both the controller and state digests. It returns a read-only array and rejects controller edits, seed or range drift, a changed sampler, or a changed episode count.
+
+The nominal evaluation produced the following result:
+
+| Metric | Value |
+|---|---:|
+| Safe landings | 999 / 1,000 (99.9%) |
+| Crash | 1 / 1,000 |
+| Mean / maximum absolute touchdown x | 0.4098 / 1.3494 m |
+| Mean / maximum absolute touchdown vx | 0.1656 / 0.5915 m/s |
+| Mean / p95 / maximum absolute touchdown vz | 0.7802 / 0.7810 / 0.7814 m/s |
+| Mean / maximum absolute touchdown attitude | 0.5991 / 3.2498 deg |
+| Mean / maximum absolute touchdown angular rate | 1.3178 / 3.6500 deg/s |
+| Mean propellant use | 51.4460 kg |
+
+The 99.9% result passes the configured 70% Week 2 acceptance gate. The single crash exceeded the 1 m horizontal position limit; the reported maxima for horizontal speed, vertical speed, attitude, and angular rate remained inside their respective contact limits. This finite simulation result is not a universal robustness claim.
+
+~~~powershell
+python scripts/evaluate_frozen_baseline.py --output-dir artifacts/week2-baseline
+~~~
+
+The command writes a JSON benchmark report, two replayable episode logs, and two GIFs. The representative success is initial-condition index 0 under nominal wind. The representative failure reuses index 0 with a 40 m/s constant horizontal wind, which produces a 2.5911 m touchdown position error and a crash. This stress case demonstrates a known failure mode and is not counted in the nominal success rate. The command checks all destination names first and never overwrites an existing output.

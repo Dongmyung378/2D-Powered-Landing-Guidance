@@ -65,6 +65,24 @@ def _positive_integer(mapping: Config, key: str) -> int:
     return value
 
 
+def _nonnegative_integer(mapping: Config, key: str) -> int:
+    value = mapping.get(key)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ConfigError(f"'{key}' must be a nonnegative integer")
+    return value
+
+
+def _sha256(mapping: Config, key: str) -> str:
+    value = mapping.get(key)
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ConfigError(f"'{key}' must be a lowercase SHA-256 hex digest")
+    return value
+
+
 def _positive_list(mapping: Config, key: str) -> list[float]:
     values = mapping.get(key)
     if not isinstance(values, list) or not values:
@@ -452,6 +470,49 @@ def validate_config(config: Config) -> None:
             )
         ):
             raise ConfigError("engine_lag_s must start at 0 and increase")
+
+    baseline_protocol = config.get("baseline_protocol")
+    if baseline_protocol is not None:
+        if not isinstance(baseline_protocol, dict):
+            raise ConfigError("'baseline_protocol' must be a mapping")
+        protocol_id = baseline_protocol.get("id")
+        if not isinstance(protocol_id, str) or not protocol_id.strip():
+            raise ConfigError("baseline_protocol.id must be a nonempty string")
+        if baseline_protocol.get("controller") != "integrated-pid":
+            raise ConfigError("baseline_protocol.controller must be 'integrated-pid'")
+        if baseline_protocol.get("frozen") is not True:
+            raise ConfigError("baseline_protocol.frozen must be true")
+        _sha256(baseline_protocol, "controller_sha256")
+
+        fixed_conditions = _mapping(baseline_protocol, "initial_conditions")
+        if fixed_conditions.get("sampler") != "integrated_uniform_v1":
+            raise ConfigError("baseline initial-condition sampler must be 'integrated_uniform_v1'")
+        fixed_episodes = _positive_integer(fixed_conditions, "episodes")
+        _nonnegative_integer(fixed_conditions, "seed")
+        _sha256(fixed_conditions, "sha256")
+
+        acceptance = _mapping(baseline_protocol, "acceptance")
+        minimum_success = _positive(acceptance, "minimum_success_rate")
+        if minimum_success > 1.0:
+            raise ConfigError("baseline minimum_success_rate cannot exceed 1")
+
+        cases = _mapping(baseline_protocol, "representative_cases")
+        success_index = _nonnegative_integer(cases, "success_initial_condition_index")
+        failure = _mapping(cases, "failure")
+        failure_index = _nonnegative_integer(failure, "initial_condition_index")
+        failure_wind = _finite(failure, "horizontal_wind_m_s")
+        if success_index >= fixed_episodes or failure_index >= fixed_episodes:
+            raise ConfigError("representative case index must be within the fixed evaluation set")
+        if failure_wind == 0.0:
+            raise ConfigError("representative failure wind must be nonzero")
+
+        provenance = _mapping(baseline_protocol, "provenance")
+        if provenance.get("tuning_method") not in {"grid", "random"}:
+            raise ConfigError("baseline provenance tuning_method must be 'grid' or 'random'")
+        _nonnegative_integer(provenance, "train_seed")
+        _nonnegative_integer(provenance, "validation_seed")
+        for key in scale_keys:
+            _positive(provenance, key)
 
 
 def load_config(path: str | Path) -> Config:

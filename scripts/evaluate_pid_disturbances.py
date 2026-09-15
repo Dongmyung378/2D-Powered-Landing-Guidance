@@ -25,11 +25,11 @@ from powered_landing_guidance import IntegratedLandingController, load_config, v
 from powered_landing_guidance.envs import RocketLandingEnv
 
 if __package__:
-    from scripts.evaluate_integrated_control import sample_integrated_initial_states
     from scripts.tune_integrated_controller import ScaleCandidate, apply_candidate
 else:
-    from evaluate_integrated_control import sample_integrated_initial_states
     from tune_integrated_controller import ScaleCandidate, apply_candidate
+
+from powered_landing_guidance.evaluation import sample_integrated_initial_states
 
 type DisturbanceKind = Literal[
     "constant_wind",

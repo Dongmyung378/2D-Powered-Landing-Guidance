@@ -12,6 +12,13 @@ from powered_landing_guidance.controllers import (
     estimate_suicide_burn,
     estimate_variable_mass_suicide_burn,
 )
+from powered_landing_guidance.evaluation import (
+    INITIAL_CONDITION_SAMPLER,
+    frozen_baseline_initial_states,
+    initial_condition_sha256,
+    integrated_controller_sha256,
+    sample_integrated_initial_states,
+)
 from powered_landing_guidance.model import (
     ACTION_NAMES,
     ACTION_UNITS,
@@ -30,6 +37,7 @@ __all__ = [
     "Control",
     "HorizontalAttitudeController",
     "IntegratedLandingController",
+    "INITIAL_CONDITION_SAMPLER",
     "State",
     "SuicideBurnController",
     "SuicideBurnEstimate",
@@ -38,7 +46,11 @@ __all__ = [
     "classify_ignition_timing",
     "estimate_suicide_burn",
     "estimate_variable_mass_suicide_burn",
+    "frozen_baseline_initial_states",
+    "initial_condition_sha256",
+    "integrated_controller_sha256",
     "load_config",
+    "sample_integrated_initial_states",
     "validate_config",
 ]
 
