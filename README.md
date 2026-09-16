@@ -8,14 +8,18 @@ A reproducible 2D reusable-rocket powered-landing project that progresses from r
 
 | Item | Current status |
 |---|---|
-| Roadmap | Week 2 classical-control baseline complete |
+| Roadmap | Week 3 optimal-control formulation (Day 15) |
 | Model | Planar 3-DoF with variable mass |
 | State | x, z, vx, vz, theta, omega, mass |
 | Action | throttle, gimbal angle |
 | Current controllers | Suicide-burn, vertical PID, horizontal-attitude, and integrated landing |
 | Runtime | Python 3.12.7 |
 
-The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, a frozen integrated PID baseline, reproducible tuning, and isolated-disturbance evaluation. Optimal control, Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
+The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, a frozen integrated PID baseline, reproducible tuning, isolated-disturbance evaluation, and the nominal optimal-control problem definition. The optimal-control solver, Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
+
+## Optimal-control teacher formulation
+
+Day 15 defines a seven-state, two-control nominal landing problem with 100 control intervals and a free final time between 5 and 25 seconds. It includes simulator-matched smooth dynamics, hard altitude/fuel/actuator bounds, landing-state constraints, an initial feasibility objective, and a second-stage fuel/touchdown/smoothness objective. The numerical solver is scheduled for Day 16; no optimized teacher trajectory or success rate is claimed yet. See the [equation-to-code table](docs/spec.md#21-day-15-optimal-control-teacher-formulation) and its [Korean counterpart](docs/spec.ko.md#15일차-최적제어-teacher-문제-정식화).
 
 ## Frozen Week 2 PID baseline
 
@@ -312,7 +316,7 @@ The tracked repository contains only source code, reproducible configuration, te
 
 - Week 1: simulator, event handling, logging, replay, and numerical verification - complete
 - Week 2: suicide-burn and frozen PID baseline - complete
-- Week 3: constrained optimal-control teacher
+- Week 3: constrained optimal-control teacher - formulation complete, solver pending
 - Week 4: dataset generation and Behavior Cloning
 - Week 5: DAgger closed-loop improvement
 - Week 6: disturbances and Monte Carlo evaluation

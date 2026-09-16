@@ -471,6 +471,31 @@ def validate_config(config: Config) -> None:
         ):
             raise ConfigError("engine_lag_s must start at 0 and increase")
 
+    optimal = config.get("optimal_control")
+    if optimal is not None:
+        if not isinstance(optimal, dict):
+            raise ConfigError("'optimal_control' must be a mapping")
+        _positive_integer(optimal, "intervals")
+        duration_low, duration_high = _range(optimal, "duration_s")
+        if duration_low <= 0.0 or duration_low == duration_high:
+            raise ConfigError("optimal_control.duration_s must have 0 < low < high")
+        reserve = _positive(optimal, "min_propellant_reserve_kg")
+        if reserve >= initial_values["mass_kg"] - dry_mass:
+            raise ConfigError("optimal_control reserve must be below initial propellant")
+        target_vz = _finite(optimal, "target_touchdown_vz_m_s")
+        if not -landing["max_abs_vz_m_s"] <= target_vz < 0.0:
+            raise ConfigError("optimal_control target touchdown vz must be descending and safe")
+        tolerance = _positive(optimal, "feasibility_tolerance")
+        if tolerance >= 1.0:
+            raise ConfigError("optimal_control feasibility_tolerance must be below 1")
+        weights = _mapping(optimal, "objective_weights")
+        if set(weights) != {"fuel", "touchdown", "smoothness"}:
+            raise ConfigError(
+                "optimal_control objective_weights keys must be fuel, touchdown, smoothness"
+            )
+        for key in ("fuel", "touchdown", "smoothness"):
+            _positive(weights, key)
+
     baseline_protocol = config.get("baseline_protocol")
     if baseline_protocol is not None:
         if not isinstance(baseline_protocol, dict):

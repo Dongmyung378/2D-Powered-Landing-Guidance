@@ -27,6 +27,7 @@ from powered_landing_guidance.model import (
     Control,
     State,
 )
+from powered_landing_guidance.optimal_control import LandingOptimalControlProblem, ObjectiveTerms
 
 __all__ = [
     "ACTION_NAMES",
@@ -38,6 +39,8 @@ __all__ = [
     "HorizontalAttitudeController",
     "IntegratedLandingController",
     "INITIAL_CONDITION_SAMPLER",
+    "LandingOptimalControlProblem",
+    "ObjectiveTerms",
     "State",
     "SuicideBurnController",
     "SuicideBurnEstimate",

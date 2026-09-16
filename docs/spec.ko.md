@@ -442,3 +442,42 @@ python scripts/evaluate_frozen_baseline.py --output-dir artifacts/week2-baseline
 ~~~
 
 이 명령은 JSON 평가 보고서, 재생 가능한 episode log 두 개와 GIF 두 개를 생성합니다. 대표 성공은 초기조건 0번의 무풍 결과입니다. 대표 실패는 같은 0번 초기조건에 40 m/s 일정 수평 바람을 적용하며, 접지 위치 오차 2.5911 m로 crash가 발생합니다. 이 스트레스 사례는 알려진 실패 양상을 보여주기 위한 것이며 명목 성공률에는 포함하지 않습니다. 실행 전 모든 대상 파일을 확인하고 기존 출력은 덮어쓰지 않습니다.
+
+## 15일차 최적제어 Teacher 문제 정식화
+
+`LandingOptimalControlProblem`에 Teacher 문제를 정의했지만 **아직 해를 구하는 솔버는 없습니다**. 수치 최적화는 16일차 작업입니다. 15일차 모델은 무풍, 이상적인 센서와 즉시 반응하는 구동기를 가정합니다. 평면 상태 순서와 단위, 추력 방향, 토크 부호, 가변 질량 식 및 착륙 판정 제한은 현재 시뮬레이터와 같습니다. 명목 실행에서는 바람 모델을 전달하지 않으므로 선택적 공기저항은 적용되지 않습니다. 최적화 식은 action clipping이나 건조질량 연료 차단을 포함하지 않습니다. 대신 구동기 경계와 1 kg 연료 여유를 강제해 가능한 궤적을 매끄러운 영역에 둡니다.
+
+상태는 `X = [x, z, vx, vz, theta, omega, m]`, 제어는 `U = [q, delta]`입니다. `q`는 무차원 throttle, `delta`는 radian gimbal 각도입니다. 제어는 `N = 100`개 구간에서 각 구간 동안 일정합니다. 종료시간 `T`는 `[5, 25] s` 범위의 결정변수이며 mesh 간격은 `h = T/N`입니다. 초기상태는 주어진 값으로 고정합니다. 모든 물리 단위는 SI이고, 각도 양의 방향은 프로젝트 규약에 따라 `+x`로 향하는 시계방향입니다.
+
+| 수학적 항목 | 식 또는 제한 | 코드 입력과 출력 |
+|---|---|---|
+| 추력 | `F = T_max q` | `dynamics(X, U)`가 throttle `q`를 받고 7성분 미분 벡터를 반환 |
+| 위치 | `dx/dt = vx`, `dz/dt = vz` | 미분 벡터 0-1번 성분 |
+| 병진 | `dvx/dt = F sin(theta + delta)/m`; `dvz/dt = F cos(theta + delta)/m - g` | 2-3번 성분, 매끄러운 허용 영역에서 기존 `state_derivative`와 일치 |
+| 회전 | `dtheta/dt = omega`; `domega/dt = -L F sin(delta)/I` | 4-5번 성분, 음의 토크 부호가 시뮬레이터와 일치 |
+| 연료 | `dm/dt = -F/(Isp g0)` | 6번 성분 |
+| 다중 사격 결함 | `X[k+1] - RK4(X[k], U[k], T/N) = 0` | `rk4_defects(states, controls, T)`가 `N x 7` 행렬 반환 |
+| 경로 여유 | `z-ground >= 0`; `m-dry_mass-1 kg >= 0`; `q_min <= q <= q_max`; `|delta| <= delta_max` | `path_margins(X, U)`가 0 이상이어야 할 여섯 값을 반환하며 상태 제한은 최종 node에도 적용 |
+| 종단 착륙 | `z(T)=ground`; `|x(T)-target_x|<=1 m`; `|vx(T)|<=1 m/s`; `-2<=vz(T)<=0 m/s`; `|theta(T)|<=5 deg`; `|omega(T)|<=5 deg/s` | `terminal_violations(X_T)`가 정규화된 양의 위반량 여섯 개를 반환; 모두 0이면 조건 충족 |
+
+종단 고도 등식의 A단계 위반량은 고정된 1 m 척도로 정규화합니다. 종단 수직속도 제약은 위로 올라가며 지면에 닿는 상태를 제외합니다. 시뮬레이터는 점 접촉 모델이며 착륙 다리와 충격 하중을 다루지 않습니다. 경로 제약은 사격 node에서 적용되므로, 최적화 결과는 node 사이 지면 관통이나 전사 오차가 없는지 사건 처리 시뮬레이터에서 다시 rollout해야 합니다.
+
+목적함수는 하나의 큰 벌점으로 합치지 않고 두 단계로 나눕니다. **A단계**에서는 초기상태, 동역학, 시간, 구동기, 고도와 연료 제약을 hard constraint로 유지하고 종단 제약만 임시로 완화합니다. 여섯 종단 위반량의 제곱합을 최소화하며, 최대 정규화 종단 위반량이 `0.001` 이하일 때만 통과합니다. 이렇게 하면 연료 절약이 착륙 실패를 상쇄하지 못합니다. **B단계**에서는 A단계 결과를 초기해로 사용하고 종단 제약까지 hard constraint로 적용한 뒤 아래 비용을 최소화합니다.
+
+~~~text
+fuel_fraction = (m_initial - m_final) / (m_initial - dry_mass)
+touchdown_error = mean([
+    ((x_final - target_x) / x_limit)^2,
+    (vx_final / vx_limit)^2,
+    ((vz_final - target_vz) / vz_limit)^2,
+    (theta_final / theta_limit)^2,
+    (omega_final / omega_limit)^2,
+])
+smoothness = mean over k=1..N-1 of [
+    ((q[k] - q[k-1]) / (q_max - q_min))^2
+    + ((delta[k] - delta[k-1]) / (2 delta_max))^2
+]
+J = 1.0 * fuel_fraction + 0.1 * touchdown_error + 0.01 * smoothness
+~~~
+
+목표 종단 수직속도 `-0.8 m/s`는 시뮬레이터의 안전 하강 구간 `[-2, 0] m/s` 안에 있습니다. 비용 항은 모두 무차원입니다. B단계 연료 비율은 명목 용량 250 kg이 아니라 해당 초기상태에서 사용할 수 있는 연료를 분모로 사용합니다. 가중치는 문제 정의의 초기 선택값이며 튜닝이나 성능 검증 결과가 아닙니다. Solver 수렴, 제약 잔차 확인과 독립 시뮬레이터 rollout까지 끝나야 Teacher 궤적으로 인정합니다.

@@ -439,3 +439,42 @@ python scripts/evaluate_frozen_baseline.py --output-dir artifacts/week2-baseline
 ~~~
 
 The command writes a JSON benchmark report, two replayable episode logs, and two GIFs. The representative success is initial-condition index 0 under nominal wind. The representative failure reuses index 0 with a 40 m/s constant horizontal wind, which produces a 2.5911 m touchdown position error and a crash. This stress case demonstrates a known failure mode and is not counted in the nominal success rate. The command checks all destination names first and never overwrites an existing output.
+
+## 21. Day 15 optimal-control teacher formulation
+
+The teacher problem is defined in `LandingOptimalControlProblem` but is **not solved yet**. Day 16 will add the numerical-program solver. The Day 15 model is a nominal, wind-free, sensor-perfect, instantaneous-actuator model. It uses the same planar state ordering, units, force direction, torque sign, variable-mass law, and landing thresholds as the simulator. The simulator's optional aerodynamic drag is absent because no wind model is supplied in nominal rollouts. The nonlinear-program equations do not clip actions or switch thrust off at dry mass; hard actuator bounds and a 1 kg propellant reserve keep feasible trajectories strictly inside that smooth region.
+
+The state is `X = [x, z, vx, vz, theta, omega, m]` and the control is `U = [q, delta]`, where `q` is dimensionless throttle and `delta` is the gimbal angle in radians. The optimization uses `N = 100` piecewise-constant control intervals. Final time `T` is a decision variable in `[5, 25] s`, with mesh step `h = T/N`. The initial state is fixed to the supplied state. Units are SI throughout; `theta` and `delta` are positive clockwise toward `+x` under the project convention.
+
+| Mathematical quantity | Equation or bound | Code input and output |
+|---|---|---|
+| Thrust | `F = T_max q` | `dynamics(X, U)` receives throttle `q`; returns a 7-vector derivative |
+| Position | `dx/dt = vx`, `dz/dt = vz` | derivative elements 0-1 |
+| Translation | `dvx/dt = F sin(theta + delta)/m`; `dvz/dt = F cos(theta + delta)/m - g` | derivative elements 2-3; matches `state_derivative` in the smooth feasible region |
+| Rotation | `dtheta/dt = omega`; `domega/dt = -L F sin(delta)/I` | derivative elements 4-5; negative torque sign matches the simulator |
+| Propellant | `dm/dt = -F/(Isp g0)` | derivative element 6 |
+| Multiple-shooting defect | `X[k+1] - RK4(X[k], U[k], T/N) = 0` | `rk4_defects(states, controls, T)` returns an `N x 7` matrix |
+| Path margins | `z-ground >= 0`; `m-dry_mass-1 kg >= 0`; `q_min <= q <= q_max`; `|delta| <= delta_max` | `path_margins(X, U)` returns six nonnegative-required values; state bounds also apply at the final node |
+| Terminal landing | `z(T)=ground`; `|x(T)-target_x|<=1 m`; `|vx(T)|<=1 m/s`; `-2<=vz(T)<=0 m/s`; `|theta(T)|<=5 deg`; `|omega(T)|<=5 deg/s` | `terminal_violations(X_T)` returns six normalized nonnegative values; zero means each terminal bound holds |
+
+The Stage A violation of the terminal-height equality is normalized by a fixed 1 m scale. The terminal descent constraint intentionally excludes upward ground contact. The simulator uses point contact and has no landing-leg or impact-load model. The path constraints apply at shooting nodes; a solver result must still be rolled out in the event-driven simulator because node feasibility alone cannot rule out between-node ground penetration or other transcription error.
+
+The objective is staged rather than relying on a single large weighted penalty. In **Stage A**, initial state, dynamics, duration, actuator, altitude, and propellant constraints are hard; terminal constraints are temporarily relaxed. The solver minimizes the sum of squares of the six normalized positive terminal violations. Stage A passes only when the maximum normalized terminal violation is at most `0.001`. This gives a measurable feasibility target and prevents low fuel use from compensating for a missed landing. Stage B starts from that solution, imposes the terminal constraints as hard bounds, and minimizes:
+
+~~~text
+fuel_fraction = (m_initial - m_final) / (m_initial - dry_mass)
+touchdown_error = mean([
+    ((x_final - target_x) / x_limit)^2,
+    (vx_final / vx_limit)^2,
+    ((vz_final - target_vz) / vz_limit)^2,
+    (theta_final / theta_limit)^2,
+    (omega_final / omega_limit)^2,
+])
+smoothness = mean over k=1..N-1 of [
+    ((q[k] - q[k-1]) / (q_max - q_min))^2
+    + ((delta[k] - delta[k-1]) / (2 delta_max))^2
+]
+J = 1.0 * fuel_fraction + 0.1 * touchdown_error + 0.01 * smoothness
+~~~
+
+The target terminal vertical velocity is `-0.8 m/s`, within the simulator's `[-2, 0] m/s` safe-descending interval. Every cost term is dimensionless. Stage B's fuel fraction uses the propellant available in the particular initial state, not the vehicle's nominal 250 kg capacity. The weights are explicit initial modeling choices, not tuned or validated performance claims. A candidate is not a teacher trajectory until a solver reports convergence, constraint residuals are checked, and independent simulator rollout agrees.

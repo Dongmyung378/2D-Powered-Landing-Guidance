@@ -68,6 +68,27 @@ def test_frozen_pid_baseline_protocol_loads() -> None:
     assert protocol["acceptance"]["minimum_success_rate"] == 0.70
 
 
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("intervals",), 0, "intervals"),
+        (("duration_s",), [5.0, 5.0], "duration_s"),
+        (("min_propellant_reserve_kg",), 250.0, "reserve"),
+        (("target_touchdown_vz_m_s",), 0.0, "target touchdown vz"),
+        (("feasibility_tolerance",), 1.0, "feasibility_tolerance"),
+        (("objective_weights", "fuel"), 0.0, "fuel"),
+    ],
+)
+def test_config_rejects_invalid_optimal_control_settings(path, value, message) -> None:
+    config = deepcopy(plg.load_config(ROOT / "configs/pid-baseline-v1.yaml"))
+    target = config["optimal_control"]
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    with pytest.raises(plg.ConfigError, match=message):
+        plg.validate_config(config)
+
+
 def test_config_rejects_initial_mass_below_dry_mass() -> None:
     config = deepcopy(plg.load_config(DEFAULT_CONFIG))
     config["initial_state"]["mass_kg"] = config["vehicle"]["dry_mass_kg"] - 1.0
