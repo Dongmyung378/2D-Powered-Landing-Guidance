@@ -17,6 +17,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+optimization = [
+    "casadi>=3.7,<4",
+]
 dev = [
     "pytest>=7",
     "ruff",

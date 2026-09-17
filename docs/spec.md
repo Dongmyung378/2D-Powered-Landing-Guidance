@@ -442,7 +442,7 @@ The command writes a JSON benchmark report, two replayable episode logs, and two
 
 ## 21. Day 15 optimal-control teacher formulation
 
-The teacher problem is defined in `LandingOptimalControlProblem` but is **not solved yet**. Day 16 will add the numerical-program solver. The Day 15 model is a nominal, wind-free, sensor-perfect, instantaneous-actuator model. It uses the same planar state ordering, units, force direction, torque sign, variable-mass law, and landing thresholds as the simulator. The simulator's optional aerodynamic drag is absent because no wind model is supplied in nominal rollouts. The nonlinear-program equations do not clip actions or switch thrust off at dry mass; hard actuator bounds and a 1 kg propellant reserve keep feasible trajectories strictly inside that smooth region.
+The seven-state teacher problem is defined in `LandingOptimalControlProblem` but the full planar problem is **not solved yet**. Day 16 adds a solver for its vertical subset only. The Day 15 model is a nominal, wind-free, sensor-perfect, instantaneous-actuator model. It uses the same planar state ordering, units, force direction, torque sign, variable-mass law, and landing thresholds as the simulator. The simulator's optional aerodynamic drag is absent because no wind model is supplied in nominal rollouts. The nonlinear-program equations do not clip actions or switch thrust off at dry mass; hard actuator bounds and a 1 kg propellant reserve keep feasible trajectories strictly inside that smooth region.
 
 The state is `X = [x, z, vx, vz, theta, omega, m]` and the control is `U = [q, delta]`, where `q` is dimensionless throttle and `delta` is the gimbal angle in radians. The optimization uses `N = 100` piecewise-constant control intervals. Final time `T` is a decision variable in `[5, 25] s`, with mesh step `h = T/N`. The initial state is fixed to the supplied state. Units are SI throughout; `theta` and `delta` are positive clockwise toward `+x` under the project convention.
 
@@ -478,3 +478,19 @@ J = 1.0 * fuel_fraction + 0.1 * touchdown_error + 0.01 * smoothness
 ~~~
 
 The target terminal vertical velocity is `-0.8 m/s`, within the simulator's `[-2, 0] m/s` safe-descending interval. Every cost term is dimensionless. Stage B's fuel fraction uses the propellant available in the particular initial state, not the vehicle's nominal 250 kg capacity. The weights are explicit initial modeling choices, not tuned or validated performance claims. A candidate is not a teacher trajectory until a solver reports convergence, constraint residuals are checked, and independent simulator rollout agrees.
+
+## 22. Day 16 vertical CasADi/IPOPT teacher
+
+Day 16 solves only the vertical subset of the Day 15 problem. Its state is `Y=[z,vz,m]`, control is throttle `q`, and dynamics are `dz/dt=vz`, `dvz/dt=T_max*q/m-g`, and `dm/dt=-T_max*q/(Isp*g0)`. The initial horizontal and attitude state must be zero. The 100 constant-control intervals, free final time in `[5,25] s`, dry-mass-plus-1-kg reserve, actuator bounds, and landing vertical-speed limit come from the same configuration as the planar formulation. Each interval has a CasADi RK4 continuity equality, making this direct multiple shooting rather than single shooting.
+
+A constant-acceleration estimate supplies the initial duration and throttle profile; a numerical rollout supplies the initial state nodes. Stage A keeps the initial state, RK4 dynamics, duration, altitude, fuel, and throttle bounds hard. Two nonnegative terminal slacks permit temporary height and vertical-speed violations, and the solver minimizes their normalized squares. Stage B starts from the Stage A solution, fixes final height to ground, constrains final speed to `[-2,0] m/s`, and minimizes the Day 15 vertical restriction of fuel fraction, touchdown-speed error, and throttle change. A stage must meet the configured `0.001` normalized feasibility threshold before its output is accepted.
+
+The JSON report records each IPOPT return status, iteration count, objective, maximum normalized hard and terminal violation, and each RK4 state defect in physical units. The optimized controls are separately integrated with the existing planar simulator at `0.02 s` steps. The report checks ground height, terminal descent speed, fuel reserve, minimum altitude, and disagreement at every optimization node; the PNG overlays this rollout and the NLP nodes. Solver or feasibility failures write a diagnostic JSON report without a plot. This independent nominal rollout does not establish performance under wind, sensor error, engine lag, or a population of initial states.
+
+~~~bash
+python -m pip install -e ".[optimization]"
+python scripts/solve_vertical_landing.py --output-dir artifacts/day16-vertical
+python scripts/solve_vertical_landing.py --initial-z 110 --initial-vz -18 --initial-mass 980 --output-dir artifacts/day16-custom
+~~~
+
+The command refuses to overwrite existing files. The nominal case converges with a `5.000 s` duration, about `-0.832 m/s` simulator terminal velocity, and about `27.435 kg` of fuel use. These are one-case outputs, not a general success-rate estimate. Day 17 will add horizontal translation; Day 18 will add rotation and gimbal torque.

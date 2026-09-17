@@ -8,18 +8,27 @@ A reproducible 2D reusable-rocket powered-landing project that progresses from r
 
 | Item | Current status |
 |---|---|
-| Roadmap | Week 3 optimal-control formulation (Day 15) |
+| Roadmap | Week 3 vertical optimal-control solver (Day 16) |
 | Model | Planar 3-DoF with variable mass |
 | State | x, z, vx, vz, theta, omega, mass |
 | Action | throttle, gimbal angle |
 | Current controllers | Suicide-burn, vertical PID, horizontal-attitude, and integrated landing |
 | Runtime | Python 3.12.7 |
 
-The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, a frozen integrated PID baseline, reproducible tuning, isolated-disturbance evaluation, and the nominal optimal-control problem definition. The optimal-control solver, Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
+The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, a frozen integrated PID baseline, reproducible tuning, isolated-disturbance evaluation, and a solved one-dimensional vertical optimal-control problem. Planar optimal-control extensions, Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
 
 ## Optimal-control teacher formulation
 
-Day 15 defines a seven-state, two-control nominal landing problem with 100 control intervals and a free final time between 5 and 25 seconds. It includes simulator-matched smooth dynamics, hard altitude/fuel/actuator bounds, landing-state constraints, an initial feasibility objective, and a second-stage fuel/touchdown/smoothness objective. The numerical solver is scheduled for Day 16; no optimized teacher trajectory or success rate is claimed yet. See the [equation-to-code table](docs/spec.md#21-day-15-optimal-control-teacher-formulation) and its [Korean counterpart](docs/spec.ko.md#15일차-최적제어-teacher-문제-정식화).
+Day 15 defines a seven-state, two-control nominal landing problem with 100 control intervals and a free final time between 5 and 25 seconds. It includes simulator-matched smooth dynamics, hard altitude/fuel/actuator bounds, landing-state constraints, an initial feasibility objective, and a second-stage fuel/touchdown/smoothness objective. See the [equation-to-code table](docs/spec.md#21-day-15-optimal-control-teacher-formulation) and its [Korean counterpart](docs/spec.ko.md#15일차-최적제어-teacher-문제-정식화).
+
+Day 16 solves the vertical `z, vz, mass` subset with CasADi/IPOPT direct multiple shooting. The command below writes a JSON report with both solver stages and constraint residuals plus a PNG comparing optimization nodes with an independent simulator rollout. It refuses to overwrite existing output files. Install the optional dependency first:
+
+~~~bash
+python -m pip install -e ".[optimization]"
+python scripts/solve_vertical_landing.py --output-dir artifacts/day16-vertical
+~~~
+
+For the nominal `z=100 m`, `vz=-20 m/s`, `mass=1000 kg` case, the solver converges and the independent nominal rollout reaches the ground at about `-0.832 m/s` after `5.000 s`, using about `27.435 kg` of propellant. This is one vertical test case, not a 2D teacher success rate or a wind-robustness result. See the [Day 16 specification](docs/spec.md#22-day-16-vertical-casadiipopt-teacher) or [Korean version](docs/spec.ko.md#16일차-수직-casadiipopt-teacher).
 
 ## Frozen Week 2 PID baseline
 
@@ -316,7 +325,7 @@ The tracked repository contains only source code, reproducible configuration, te
 
 - Week 1: simulator, event handling, logging, replay, and numerical verification - complete
 - Week 2: suicide-burn and frozen PID baseline - complete
-- Week 3: constrained optimal-control teacher - formulation complete, solver pending
+- Week 3: constrained optimal-control teacher - vertical solver complete, planar extension pending
 - Week 4: dataset generation and Behavior Cloning
 - Week 5: DAgger closed-loop improvement
 - Week 6: disturbances and Monte Carlo evaluation
