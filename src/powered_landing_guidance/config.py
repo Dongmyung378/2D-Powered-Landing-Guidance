@@ -479,6 +479,9 @@ def validate_config(config: Config) -> None:
         duration_low, duration_high = _range(optimal, "duration_s")
         if duration_low <= 0.0 or duration_low == duration_high:
             raise ConfigError("optimal_control.duration_s must have 0 < low < high")
+        angle_limit = _positive(optimal, "max_abs_thrust_angle_deg")
+        if angle_limit > 45.0:
+            raise ConfigError("optimal_control.max_abs_thrust_angle_deg must not exceed 45")
         reserve = _positive(optimal, "min_propellant_reserve_kg")
         if reserve >= initial_values["mass_kg"] - dry_mass:
             raise ConfigError("optimal_control reserve must be below initial propellant")

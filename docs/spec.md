@@ -493,4 +493,22 @@ python scripts/solve_vertical_landing.py --output-dir artifacts/day16-vertical
 python scripts/solve_vertical_landing.py --initial-z 110 --initial-vz -18 --initial-mass 980 --output-dir artifacts/day16-custom
 ~~~
 
-The command refuses to overwrite existing files. The nominal case converges with a `5.000 s` duration, about `-0.832 m/s` simulator terminal velocity, and about `27.435 kg` of fuel use. These are one-case outputs, not a general success-rate estimate. Day 17 will add horizontal translation; Day 18 will add rotation and gimbal torque.
+The command refuses to overwrite existing files. The nominal case converges with a `5.000 s` duration, about `-0.832 m/s` simulator terminal velocity, and about `27.435 kg` of fuel use. These are one-case outputs, not a general success-rate estimate. Day 17 adds horizontal translation; Day 18 adds rotation and gimbal torque.
+
+## 23. Day 17 planar translation teacher
+
+Day 17 extends the solved vertical problem to `Y=[x,z,vx,vz,m]` with controls `U=[q,alpha]`. Here `alpha` is the **absolute thrust-vector angle from vertical**, not the physical gimbal angle. The model deliberately omits body attitude and angular velocity until Day 18. Its equations are `dx/dt=vx`, `dz/dt=vz`, `dvx/dt=T_max*q*sin(alpha)/m`, `dvz/dt=T_max*q*cos(alpha)/m-g`, and `dm/dt=-T_max*q/(Isp*g0)`. The physical state/action ordering and signs match the full simulator when its body angle is set to `alpha` and gimbal to zero for one interval.
+
+The direct multiple-shooting transcription uses the same 100 intervals and free `[5,25] s` horizon as Day 16. Initial state, RK4 continuity, `z>=ground`, `m>=dry_mass+1 kg`, `q_min<=q<=q_max`, and `|alpha|<=15 deg` are hard constraints at shooting nodes. The 15-degree direct-vector limit is an explicit reduced-model assumption; it is not evidence that the body can rotate or that a gimbal can realize this command. Stage A relaxes only terminal position, height, horizontal speed, and descending vertical-speed limits with four nonnegative normalized slacks. Stage B fixes height to ground, imposes `|x-target_x|<=1 m`, `|vx|<=1 m/s`, `-2<=vz<=0 m/s`, and minimizes the vertical-planar restriction of the Day 15 fuel, touchdown, and control-change cost. Each stage is accepted only if its relevant normalized violations are at most `0.001`.
+
+The default analytic seed estimates descent time from altitude and vertical speed, uses a cubic horizontal-position curve ending at the target with zero horizontal velocity, maps its required accelerations to bounded throttle and thrust angle, and integrates the resulting controls to supply consistent state nodes. With `--guess pid`, the existing full-model integrated PID controller runs from the same initial state. Its applied throttle and instantaneous net thrust direction (`theta+gimbal`) are sampled onto the optimization grid, clipped to the reduced-model control bounds, and re-integrated with the five-state model. The PID trajectory is only an initial guess; the NLP solution is checked independently and does not inherit a PID success claim.
+
+After IPOPT converges, the saved controls are replayed through `simulate_planar` at the configured fine step. For each control interval, the replay sets body heading to the optimized `alpha` and gimbal to zero, then compares all five translational states at every shooting node. This tests the ideal-vector translational dynamics and between-node altitude/fuel behavior, **not** physical rotation, gimbal slew, or touchdown attitude. The report contains both solver statuses, objectives, iteration counts, hard/terminal violations, five physical-unit RK4 defects, and the replay comparison. Solver or feasibility failures save a diagnostic JSON without a plot. Existing output files are never overwritten.
+
+~~~bash
+python scripts/solve_translation_landing.py --output-dir artifacts/day17-translation
+python scripts/solve_translation_landing.py --guess pid --output-dir artifacts/day17-pid
+python scripts/solve_translation_landing.py --initial-x -12 --initial-vx 1 --output-dir artifacts/day17-custom
+~~~
+
+The default single-case start is `x=10 m`, `z=100 m`, `vx=0`, `vz=-20 m/s`, `m=1000 kg`. Both the analytic and PID-seeded runs converge. The analytic-seeded ideal-vector replay ends at approximately `x=0.003 m`, `vx=-0.005 m/s`, `vz=-0.902 m/s`, consuming `27.605 kg` in `5.000 s`. This demonstrates horizontal-error correction for one initial condition, not a distribution-level success rate. Day 18 will introduce `theta`, `omega`, gimbal torque, and attitude limits.

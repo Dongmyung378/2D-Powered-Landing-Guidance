@@ -8,14 +8,14 @@
 
 | 항목 | 현재 상태 |
 |---|---|
-| 로드맵 | 3주차 수직 최적제어 솔버(16일차) |
+| 로드맵 | 3주차 평면 병진 최적제어 솔버(17일차) |
 | 모델 | 가변 질량 평면 3자유도 |
 | 상태 | x, z, vx, vz, theta, omega, mass |
 | 제어 | throttle, gimbal angle |
 | 현재 제어기 | Suicide-burn, 수직 PID, 수평·자세 제어, 통합 착륙 제어 |
 | 실행 환경 | Python 3.12.7 |
 
-현재 저장소에는 검증된 시뮬레이션 환경, 두 가지 비학습 수직 착륙 기준선, 수평 위치·자세 직렬 제어기, 동결된 통합 PID 기준선, 재현 가능한 튜닝, 분리 외란 평가와 풀이가 가능한 1차원 수직 최적제어 문제가 구현되어 있습니다. 평면 최적제어 확장, Behavior Cloning, DAgger, 복합 불확실성과 더 넓은 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
+현재 저장소에는 검증된 시뮬레이션 환경, 두 가지 비학습 수직 착륙 기준선, 수평 위치·자세 직렬 제어기, 동결된 통합 PID 기준선, 재현 가능한 튜닝, 분리 외란 평가, 수직 및 이상적인 추력 방향을 사용하는 평면 병진 최적제어 문제가 구현되어 있습니다. 회전·짐벌 동역학, Behavior Cloning, DAgger, 복합 불확실성과 더 넓은 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
 
 ## 최적제어 Teacher 문제 정식화
 
@@ -29,6 +29,15 @@ python scripts/solve_vertical_landing.py --output-dir artifacts/day16-vertical
 ~~~
 
 기본 초기조건 `z=100 m`, `vz=-20 m/s`, `mass=1000 kg`에서 솔버가 수렴했고, 명목 시뮬레이터 재적분은 약 `5.000초` 후 `-0.832 m/s`로 지면에 도달하며 연료 약 `27.435 kg`을 사용했습니다. 이는 수직 초기조건 한 건의 결과이지 2D Teacher 성공률이나 바람에 대한 강건성 결과가 아닙니다. [16일차 명세](docs/spec.ko.md#16일차-수직-casadiipopt-teacher)와 [영문 명세](docs/spec.md#22-day-16-vertical-casadiipopt-teacher)를 참고하세요.
+
+17일차에는 수평 위치·속도와 추력 벡터 방향 제어를 추가했습니다. 5상태 솔버의 초기 추정치는 해석식 또는 동결된 통합 PID 제어기의 궤적에서 선택할 수 있습니다. 기본 예시는 착륙 지점 오른쪽 10 m에서 출발하며, 2D 비행경로 PNG와 제약 진단 JSON을 저장합니다.
+
+~~~bash
+python scripts/solve_translation_landing.py --output-dir artifacts/day17-translation
+python scripts/solve_translation_landing.py --guess pid --output-dir artifacts/day17-pid
+~~~
+
+기본 조건의 이상적인 추력 방향 재생 결과는 목표 위치 오차 약 `0.003 m`, 수평속도 `-0.005 m/s`, 수직속도 `-0.902 m/s`로 끝났습니다. 이 모델은 절대 추력 방향을 직접 명령하고 각 제어 구간 사이 재생 시 자세를 즉시 바꾸므로, 실제 자세·짐벌 궤적의 가능성을 증명하지는 않습니다. 이 물리 제약은 18일차에 추가합니다. [17일차 명세](docs/spec.ko.md#17일차-평면-병진-teacher)와 [영문 명세](docs/spec.md#23-day-17-planar-translation-teacher)를 참고하세요.
 
 ## 동결된 2주차 PID 기준선
 
@@ -325,7 +334,7 @@ Git에 포함되는 저장소에는 소스 코드, 재현 가능한 설정, 기�
 
 - 1주차: 시뮬레이터, 사건 처리, 기록, 재생과 수치 검증 - 완료
 - 2주차: suicide-burn과 동결 PID 기준선 - 완료
-- 3주차: 제약 최적제어 교사 - 수직 솔버 완료, 평면 확장 예정
+- 3주차: 제약 최적제어 교사 - 평면 병진 완료, 회전 확장 예정
 - 4주차: 데이터셋 생성과 Behavior Cloning
 - 5주차: DAgger 폐루프 개선
 - 6주차: 외란과 Monte Carlo 평가

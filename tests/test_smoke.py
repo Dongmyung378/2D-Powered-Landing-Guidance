@@ -73,6 +73,8 @@ def test_frozen_pid_baseline_protocol_loads() -> None:
     [
         (("intervals",), 0, "intervals"),
         (("duration_s",), [5.0, 5.0], "duration_s"),
+        (("max_abs_thrust_angle_deg",), 0.0, "max_abs_thrust_angle_deg"),
+        (("max_abs_thrust_angle_deg",), 60.0, "max_abs_thrust_angle_deg"),
         (("min_propellant_reserve_kg",), 250.0, "reserve"),
         (("target_touchdown_vz_m_s",), 0.0, "target touchdown vz"),
         (("feasibility_tolerance",), 1.0, "feasibility_tolerance"),

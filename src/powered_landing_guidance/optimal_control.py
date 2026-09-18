@@ -57,6 +57,7 @@ class LandingOptimalControlProblem:
     target_x_m: float
     intervals: int
     duration_bounds_s: tuple[float, float]
+    max_abs_thrust_angle_rad: float
     min_propellant_reserve_kg: float
     terminal_limits: NDArray[np.float64]
     target_touchdown_vz_m_s: float
@@ -106,6 +107,7 @@ class LandingOptimalControlProblem:
             target_x_m=float(config["integrated_landing_controller"]["target_x_m"]),
             intervals=int(settings["intervals"]),
             duration_bounds_s=tuple(float(value) for value in settings["duration_s"]),
+            max_abs_thrust_angle_rad=float(np.deg2rad(settings["max_abs_thrust_angle_deg"])),
             min_propellant_reserve_kg=reserve,
             terminal_limits=limits,
             target_touchdown_vz_m_s=float(settings["target_touchdown_vz_m_s"]),

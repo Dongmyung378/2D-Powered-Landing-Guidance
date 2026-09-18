@@ -1,4 +1,4 @@
-# Powered Landing Guidance
+# 2D Powered Landing Guidance
 
 [Korean README](README.ko.md)
 
@@ -8,14 +8,14 @@ A reproducible 2D reusable-rocket powered-landing project that progresses from r
 
 | Item | Current status |
 |---|---|
-| Roadmap | Week 3 vertical optimal-control solver (Day 16) |
+| Roadmap | Week 3 planar-translation optimal-control solver (Day 17) |
 | Model | Planar 3-DoF with variable mass |
 | State | x, z, vx, vz, theta, omega, mass |
 | Action | throttle, gimbal angle |
 | Current controllers | Suicide-burn, vertical PID, horizontal-attitude, and integrated landing |
 | Runtime | Python 3.12.7 |
 
-The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, a frozen integrated PID baseline, reproducible tuning, isolated-disturbance evaluation, and a solved one-dimensional vertical optimal-control problem. Planar optimal-control extensions, Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
+The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, a frozen integrated PID baseline, reproducible tuning, isolated-disturbance evaluation, and solved vertical and ideal-vector planar-translation optimal-control problems. Rotation and gimbal dynamics, Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
 
 ## Optimal-control teacher formulation
 
@@ -29,6 +29,15 @@ python scripts/solve_vertical_landing.py --output-dir artifacts/day16-vertical
 ~~~
 
 For the nominal `z=100 m`, `vz=-20 m/s`, `mass=1000 kg` case, the solver converges and the independent nominal rollout reaches the ground at about `-0.832 m/s` after `5.000 s`, using about `27.435 kg` of propellant. This is one vertical test case, not a 2D teacher success rate or a wind-robustness result. See the [Day 16 specification](docs/spec.md#22-day-16-vertical-casadiipopt-teacher) or [Korean version](docs/spec.ko.md#16일차-수직-casadiipopt-teacher).
+
+Day 17 adds horizontal position and velocity plus direct thrust-vector angle as a second control. The five-state solver supports either an analytic initial guess or a sampled trajectory from the frozen integrated PID controller. The default demonstration begins 10 m to the right of the pad and writes a 2D flight-path PNG and a JSON constraint report:
+
+~~~bash
+python scripts/solve_translation_landing.py --output-dir artifacts/day17-translation
+python scripts/solve_translation_landing.py --guess pid --output-dir artifacts/day17-pid
+~~~
+
+In the default case, the ideal-vector replay ends about `0.003 m` from the pad, with horizontal velocity `-0.005 m/s` and vertical velocity `-0.902 m/s`. This model directly commands the absolute thrust direction and resets the replay heading between control intervals; it does **not** prove a feasible attitude/gimbal trajectory. Day 18 adds those physical constraints. See the [Day 17 specification](docs/spec.md#23-day-17-planar-translation-teacher) or [Korean version](docs/spec.ko.md#17일차-평면-병진-teacher).
 
 ## Frozen Week 2 PID baseline
 
@@ -325,7 +334,7 @@ The tracked repository contains only source code, reproducible configuration, te
 
 - Week 1: simulator, event handling, logging, replay, and numerical verification - complete
 - Week 2: suicide-burn and frozen PID baseline - complete
-- Week 3: constrained optimal-control teacher - vertical solver complete, planar extension pending
+- Week 3: constrained optimal-control teacher - planar translation complete, rotation pending
 - Week 4: dataset generation and Behavior Cloning
 - Week 5: DAgger closed-loop improvement
 - Week 6: disturbances and Monte Carlo evaluation

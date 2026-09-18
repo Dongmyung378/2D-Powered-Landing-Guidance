@@ -496,4 +496,22 @@ python scripts/solve_vertical_landing.py --output-dir artifacts/day16-vertical
 python scripts/solve_vertical_landing.py --initial-z 110 --initial-vz -18 --initial-mass 980 --output-dir artifacts/day16-custom
 ~~~
 
-기존 결과 파일은 덮어쓰지 않습니다. 기본 초기조건에서는 종료시간 `5.000 s`, 시뮬레이터 최종 속도 약 `-0.832 m/s`, 연료 사용량 약 `27.435 kg`으로 수렴했습니다. 한 건의 수치 결과이며 전체 성공률은 아닙니다. 17일차에는 수평 병진을, 18일차에는 회전과 짐벌 토크를 추가합니다.
+기존 결과 파일은 덮어쓰지 않습니다. 기본 초기조건에서는 종료시간 `5.000 s`, 시뮬레이터 최종 속도 약 `-0.832 m/s`, 연료 사용량 약 `27.435 kg`으로 수렴했습니다. 한 건의 수치 결과이며 전체 성공률은 아닙니다. 17일차에는 수평 병진을 추가했고, 18일차에는 회전과 짐벌 토크를 추가합니다.
+
+## 17일차 평면 병진 Teacher
+
+17일차는 풀이가 가능한 수직 문제를 `Y=[x,z,vx,vz,m]`, 제어 `U=[q,alpha]`로 확장합니다. `alpha`는 수직축 기준 **절대 추력 벡터 각도**이며 실제 짐벌 각도가 아닙니다. 몸체 자세와 각속도는 의도적으로 18일차까지 제외합니다. 동역학은 `dx/dt=vx`, `dz/dt=vz`, `dvx/dt=T_max*q*sin(alpha)/m`, `dvz/dt=T_max*q*cos(alpha)/m-g`, `dm/dt=-T_max*q/(Isp*g0)`입니다. 한 구간에서 몸체 각도를 `alpha`, 짐벌을 0으로 둔 기존 시뮬레이터의 병진 상태·부호와 일치합니다.
+
+직접 다중 사격은 16일차와 같은 제어 구간 100개와 `[5,25] s` 자유 종료시간을 사용합니다. 초기상태, RK4 연속 등식, `z>=ground`, `m>=dry_mass+1 kg`, `q_min<=q<=q_max`, `|alpha|<=15 deg`는 사격 node의 hard constraint입니다. 추력 방향 15도 제한은 축소 모델의 명시적 가정이며 몸체 회전이나 짐벌이 그 명령을 실현할 수 있다는 증거가 아닙니다. A단계는 종단 위치, 고도, 수평속도와 하강 수직속도 제한만 네 개의 비음수 정규화 slack으로 일시 완화합니다. B단계는 종단 고도를 지면으로 고정하고 `|x-target_x|<=1 m`, `|vx|<=1 m/s`, `-2<=vz<=0 m/s`를 적용한 뒤 15일차 연료·접지·제어 변화 비용 중 병진 부분을 최소화합니다. 관련 정규화 위반량이 `0.001` 이하일 때만 각 단계의 해를 채택합니다.
+
+기본 해석식 초기 추정치는 고도·수직속도로 하강 시간을 추정하고, 목표 위치와 수평속도 0으로 끝나는 수평 위치 3차 곡선을 만든 뒤 필요한 가속도를 제한된 throttle과 추력 각도로 바꿉니다. 이렇게 정한 제어를 적분해 사격 상태 node를 만듭니다. `--guess pid`를 선택하면 기존 통합 PID를 같은 초기상태에서 실행하고 적용 throttle과 순간 순추력 방향(`theta+gimbal`)을 최적화 격자에 표본화합니다. 표본화된 제어는 축소 모델의 경계로 제한한 뒤 5상태 모델로 다시 적분합니다. PID 궤적은 초기 추정치일 뿐이며, 최적해가 PID의 착륙 성공을 그대로 이어받는 것은 아닙니다.
+
+IPOPT 수렴 후 저장된 제어를 설정된 더 작은 시간 간격으로 `simulate_planar`에 재생합니다. 각 구간마다 몸체 각도를 최적 `alpha`, 짐벌을 0으로 설정하고 다섯 병진 상태를 모든 사격 node에서 비교합니다. 이는 이상적인 추력 방향 병진 동역학과 node 사이 고도·연료 동작을 확인하지만, **물리적 회전·짐벌 변화속도·접지 자세는 검증하지 않습니다**. JSON에는 두 단계의 솔버 상태, 목적값, 반복 수, hard·종단 위반량, 다섯 상태의 물리 단위 RK4 결함과 재생 비교가 담깁니다. 솔버나 가능해 탐색 실패 시 그래프 없이 진단 JSON을 저장하며, 기존 결과 파일은 덮어쓰지 않습니다.
+
+~~~bash
+python scripts/solve_translation_landing.py --output-dir artifacts/day17-translation
+python scripts/solve_translation_landing.py --guess pid --output-dir artifacts/day17-pid
+python scripts/solve_translation_landing.py --initial-x -12 --initial-vx 1 --output-dir artifacts/day17-custom
+~~~
+
+기본 단일 조건은 `x=10 m`, `z=100 m`, `vx=0`, `vz=-20 m/s`, `m=1000 kg`입니다. 해석식과 PID 초기 추정치 모두 수렴했습니다. 해석식 초기 추정치의 이상 추력 방향 재생 결과는 약 `5.000 s`에 `x=0.003 m`, `vx=-0.005 m/s`, `vz=-0.902 m/s`로 끝나며 연료 `27.605 kg`을 사용했습니다. 이는 초기조건 한 건에서의 수평 오차 수정 결과이지 여러 조건의 성공률이 아닙니다. 18일차에는 `theta`, `omega`, 짐벌 토크와 자세 제한을 추가합니다.
