@@ -8,14 +8,14 @@
 
 | 항목 | 현재 상태 |
 |---|---|
-| 로드맵 | 3주차 평면 병진 최적제어 솔버(17일차) |
+| 로드맵 | 3주차 전체 평면 3자유도 최적제어 솔버(18일차) |
 | 모델 | 가변 질량 평면 3자유도 |
 | 상태 | x, z, vx, vz, theta, omega, mass |
 | 제어 | throttle, gimbal angle |
 | 현재 제어기 | Suicide-burn, 수직 PID, 수평·자세 제어, 통합 착륙 제어 |
 | 실행 환경 | Python 3.12.7 |
 
-현재 저장소에는 검증된 시뮬레이션 환경, 두 가지 비학습 수직 착륙 기준선, 수평 위치·자세 직렬 제어기, 동결된 통합 PID 기준선, 재현 가능한 튜닝, 분리 외란 평가, 수직 및 이상적인 추력 방향을 사용하는 평면 병진 최적제어 문제가 구현되어 있습니다. 회전·짐벌 동역학, Behavior Cloning, DAgger, 복합 불확실성과 더 넓은 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
+현재 저장소에는 검증된 시뮬레이션 환경, 두 가지 비학습 수직 착륙 기준선, 수평 위치·자세 직렬 제어기, 동결된 통합 PID 기준선, 재현 가능한 튜닝, 분리 외란 평가, 수직·이상 추력 방향 병진·전체 평면 3자유도 최적제어 문제가 구현되어 있습니다. 목적함수 정규화, 격자 비교, Behavior Cloning, DAgger, 복합 불확실성과 더 넓은 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
 
 ## 최적제어 Teacher 문제 정식화
 
@@ -37,7 +37,15 @@ python scripts/solve_translation_landing.py --output-dir artifacts/day17-transla
 python scripts/solve_translation_landing.py --guess pid --output-dir artifacts/day17-pid
 ~~~
 
-기본 조건의 이상적인 추력 방향 재생 결과는 목표 위치 오차 약 `0.003 m`, 수평속도 `-0.005 m/s`, 수직속도 `-0.902 m/s`로 끝났습니다. 이 모델은 절대 추력 방향을 직접 명령하고 각 제어 구간 사이 재생 시 자세를 즉시 바꾸므로, 실제 자세·짐벌 궤적의 가능성을 증명하지는 않습니다. 이 물리 제약은 18일차에 추가합니다. [17일차 명세](docs/spec.ko.md#17일차-평면-병진-teacher)와 [영문 명세](docs/spec.md#23-day-17-planar-translation-teacher)를 참고하세요.
+기본 조건의 이상적인 추력 방향 재생 결과는 목표 위치 오차 약 `0.003 m`, 수평속도 `-0.005 m/s`, 수직속도 `-0.902 m/s`로 끝났습니다. 이 모델은 절대 추력 방향을 직접 명령하고 각 제어 구간 사이 재생 시 자세를 즉시 바꾸므로, 실제 자세·짐벌 궤적의 가능성을 증명하지는 않습니다. [17일차 명세](docs/spec.ko.md#17일차-평면-병진-teacher)와 [영문 명세](docs/spec.md#23-day-17-planar-translation-teacher)를 참고하세요.
+
+18일차에는 이 이상화를 없애고 `x, z, vx, vz, theta, omega, mass` 전체 상태와 실제 throttle·gimbal 제어를 사용합니다. 솔버는 몸체 기울기 20도, gimbal 15도, 각속도 초당 30도 제한과 최종 자세·각속도 제한을 적용합니다. PID episode는 초기 추정치로만 사용하며 두 최적화 단계와 독립 전체 모델 재적분을 각각 검증합니다.
+
+~~~bash
+python scripts/solve_planar_landing.py --output-dir artifacts/day18-planar-3dof
+~~~
+
+기본 예시는 `x=10 m`, `z=100 m`, `vz=-20 m/s`, `theta=3도`, `omega=-1 deg/s`에서 시작합니다. 제어 구간 100개의 해는 `5.000초` 후 약 `x=0.010 m`, `vx=-0.019 m/s`, `vz=-0.975 m/s`, `theta=0.074도`, `omega=-0.019 deg/s`로 끝나며 연료 `27.839 kg`을 사용했습니다. 최대 몸체 기울기는 `14.220도`, 최대 각속도는 `23.717 deg/s`, 최대 gimbal은 `15.000도`입니다. 이는 무풍·즉시 반응 구동기를 가정한 단일 명목 해이며 강건성이나 하드웨어 안전 결과가 아닙니다. [18일차 명세](docs/spec.ko.md#18일차-전체-평면-3자유도-teacher)와 [영문 명세](docs/spec.md#24-day-18-full-planar-3-dof-teacher)를 참고하세요.
 
 ## 동결된 2주차 PID 기준선
 

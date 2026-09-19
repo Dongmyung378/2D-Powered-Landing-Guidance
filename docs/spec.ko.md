@@ -445,7 +445,7 @@ python scripts/evaluate_frozen_baseline.py --output-dir artifacts/week2-baseline
 
 ## 15일차 최적제어 Teacher 문제 정식화
 
-`LandingOptimalControlProblem`에 7상태 Teacher 문제를 정의했지만 **전체 평면 문제의 해를 구하는 솔버는 아직 없습니다**. 16일차에는 수직 부분만 풉니다. 15일차 모델은 무풍, 이상적인 센서와 즉시 반응하는 구동기를 가정합니다. 평면 상태 순서와 단위, 추력 방향, 토크 부호, 가변 질량 식 및 착륙 판정 제한은 현재 시뮬레이터와 같습니다. 명목 실행에서는 바람 모델을 전달하지 않으므로 선택적 공기저항은 적용되지 않습니다. 최적화 식은 action clipping이나 건조질량 연료 차단을 포함하지 않습니다. 대신 구동기 경계와 1 kg 연료 여유를 강제해 가능한 궤적을 매끄러운 영역에 둡니다.
+`LandingOptimalControlProblem`에 7상태 Teacher 문제를 정의했습니다. 16일차에는 수직 부분, 17일차에는 이상 추력 방향 병진 부분을 먼저 풀었고 18일차에는 전체 평면 문제를 풉니다. 모델은 무풍, 이상적인 센서와 즉시 반응하는 구동기를 가정합니다. 평면 상태 순서와 단위, 추력 방향, 토크 부호, 가변 질량 식 및 착륙 판정 제한은 현재 시뮬레이터와 같습니다. 명목 실행에서는 바람 모델을 전달하지 않으므로 선택적 공기저항은 적용되지 않습니다. 최적화 식은 action clipping이나 건조질량 연료 차단을 포함하지 않습니다. 대신 구동기 경계와 1 kg 연료 여유를 강제해 가능한 궤적을 매끄러운 영역에 둡니다.
 
 상태는 `X = [x, z, vx, vz, theta, omega, m]`, 제어는 `U = [q, delta]`입니다. `q`는 무차원 throttle, `delta`는 radian gimbal 각도입니다. 제어는 `N = 100`개 구간에서 각 구간 동안 일정합니다. 종료시간 `T`는 `[5, 25] s` 범위의 결정변수이며 mesh 간격은 `h = T/N`입니다. 초기상태는 주어진 값으로 고정합니다. 모든 물리 단위는 SI이고, 각도 양의 방향은 프로젝트 규약에 따라 `+x`로 향하는 시계방향입니다.
 
@@ -457,7 +457,7 @@ python scripts/evaluate_frozen_baseline.py --output-dir artifacts/week2-baseline
 | 회전 | `dtheta/dt = omega`; `domega/dt = -L F sin(delta)/I` | 4-5번 성분, 음의 토크 부호가 시뮬레이터와 일치 |
 | 연료 | `dm/dt = -F/(Isp g0)` | 6번 성분 |
 | 다중 사격 결함 | `X[k+1] - RK4(X[k], U[k], T/N) = 0` | `rk4_defects(states, controls, T)`가 `N x 7` 행렬 반환 |
-| 경로 여유 | `z-ground >= 0`; `m-dry_mass-1 kg >= 0`; `q_min <= q <= q_max`; `|delta| <= delta_max` | `path_margins(X, U)`가 0 이상이어야 할 여섯 값을 반환하며 상태 제한은 최종 node에도 적용 |
+| 경로 여유 | `z-ground >= 0`; `m-dry_mass-1 kg >= 0`; `q_min <= q <= q_max`; `|delta| <= delta_max`; `|theta| <= 20 deg`; `|omega| <= 30 deg/s` | `path_margins(X, U)`가 0 이상이어야 할 열 개 값을 반환하며 상태 제한은 최종 node에도 적용 |
 | 종단 착륙 | `z(T)=ground`; `|x(T)-target_x|<=1 m`; `|vx(T)|<=1 m/s`; `-2<=vz(T)<=0 m/s`; `|theta(T)|<=5 deg`; `|omega(T)|<=5 deg/s` | `terminal_violations(X_T)`가 정규화된 양의 위반량 여섯 개를 반환; 모두 0이면 조건 충족 |
 
 종단 고도 등식의 A단계 위반량은 고정된 1 m 척도로 정규화합니다. 종단 수직속도 제약은 위로 올라가며 지면에 닿는 상태를 제외합니다. 시뮬레이터는 점 접촉 모델이며 착륙 다리와 충격 하중을 다루지 않습니다. 경로 제약은 사격 node에서 적용되므로, 최적화 결과는 node 사이 지면 관통이나 전사 오차가 없는지 사건 처리 시뮬레이터에서 다시 rollout해야 합니다.
@@ -514,4 +514,23 @@ python scripts/solve_translation_landing.py --guess pid --output-dir artifacts/d
 python scripts/solve_translation_landing.py --initial-x -12 --initial-vx 1 --output-dir artifacts/day17-custom
 ~~~
 
-기본 단일 조건은 `x=10 m`, `z=100 m`, `vx=0`, `vz=-20 m/s`, `m=1000 kg`입니다. 해석식과 PID 초기 추정치 모두 수렴했습니다. 해석식 초기 추정치의 이상 추력 방향 재생 결과는 약 `5.000 s`에 `x=0.003 m`, `vx=-0.005 m/s`, `vz=-0.902 m/s`로 끝나며 연료 `27.605 kg`을 사용했습니다. 이는 초기조건 한 건에서의 수평 오차 수정 결과이지 여러 조건의 성공률이 아닙니다. 18일차에는 `theta`, `omega`, 짐벌 토크와 자세 제한을 추가합니다.
+기본 단일 조건은 `x=10 m`, `z=100 m`, `vx=0`, `vz=-20 m/s`, `m=1000 kg`입니다. 해석식과 PID 초기 추정치 모두 수렴했습니다. 해석식 초기 추정치의 이상 추력 방향 재생 결과는 약 `5.000 s`에 `x=0.003 m`, `vx=-0.005 m/s`, `vz=-0.902 m/s`로 끝나며 연료 `27.605 kg`을 사용했습니다. 이는 초기조건 한 건에서의 수평 오차 수정 결과이지 여러 조건의 성공률이 아닙니다. 18일차에는 자세를 즉시 바꾸는 가정을 없애고 실제 자세·gimbal 궤적을 풉니다.
+
+## 18일차 전체 평면 3자유도 Teacher
+
+18일차에는 전체 상태 `X=[x,z,vx,vz,theta,omega,m]`와 물리 제어 `U=[q,delta]`를 풉니다. 17일차와 달리 `delta`는 몸체 축 기준 gimbal 각도입니다. 병진 운동은 관성계 추력 방향 `theta+delta`를 사용하고 회전 운동은 `dtheta/dt=omega`, `domega/dt=-L*T_max*q*sin(delta)/I`를 사용합니다. CasADi 기호 미분식은 동일한 상태와 제어에서 기존 시뮬레이터 미분식과 일치함을 검사했습니다.
+
+직접 다중 사격 문제는 구간별 일정한 제어 100개와 `[5,25] s` 자유 종료시간을 유지합니다. 모든 사격 node에 고도, 건조질량 위 1 kg 연료 여유, 몸체 기울기 `|theta|<=20 deg`, 각속도 `|omega|<=30 deg/s` 제한을 적용합니다. 모든 제어에는 물리 throttle 범위와 `|delta|<=15 deg`를 적용합니다. A단계는 여섯 착륙 조건만 정규화된 비음수 slack으로 일시 완화합니다. B단계는 최종 고도를 지면으로 고정하고 위치·속도·자세·각속도 착륙 제한을 hard constraint로 적용한 뒤 기존 연료·접지·제어 변화 목적함수를 최소화합니다.
+
+통합 PID 제어기는 요청한 초기상태에서 한 번 실행되어 실용적인 초기 제어열을 제공합니다. 이 제어를 최적화 격자에 표본화하고 7상태 RK4 모델로 다시 적분하므로 초기 node는 동역학적으로 일관됩니다. PID 결과는 초기 추정치의 출처로만 저장됩니다. IPOPT 수렴, 독립 계산한 hard·종단 위반량 `0.001` 이하, 별도의 세밀한 시뮬레이터 재적분을 모두 통과해야 Teacher 궤적으로 채택합니다.
+
+실패 보고서는 실패 단계, IPOPT 상태, 가장 큰 제약의 이름과 크기, 전체 hard constraint 분해값, 여섯 종단 위반량과 상태별 RK4 결함을 기록합니다. 따라서 단순한 infeasible 상태만 남기지 않고 고도, 연료, 구동기, 기울기, 각속도, 시간, 동역학과 종단 조건 중 무엇이 문제인지 구분할 수 있습니다.
+
+독립 재적분은 구간 사이 `theta`와 `omega`를 연속으로 유지하고 최적 gimbal을 `simulate_planar`에 직접 적용합니다. 자세를 강제로 재설정하지 않습니다. 종단 조건 전체, node 사이 고도, 연료 여유, 기울기, 각속도, gimbal 크기와 모든 사격 node의 불일치를 검사합니다. 보고서와 그래프는 기존 파일을 덮어쓰지 않습니다.
+
+~~~bash
+python scripts/solve_planar_landing.py --output-dir artifacts/day18-planar-3dof
+python scripts/solve_planar_landing.py --initial-x -8 --initial-theta-deg -2 --initial-omega-deg-s 1 --output-dir artifacts/day18-custom
+~~~
+
+기본 조건은 `x=10 m`, `z=100 m`, `vx=0`, `vz=-20 m/s`, `theta=3 deg`, `omega=-1 deg/s`, `m=1000 kg`입니다. 두 단계 모두 `Solve_Succeeded`를 반환했습니다. 전체 모델 재적분은 `5.000 s` 후 약 `x=0.010 m`, `vx=-0.019 m/s`, `vz=-0.975 m/s`, `theta=0.074 deg`, `omega=-0.019 deg/s`로 끝나며 연료 `27.839 kg`을 사용했습니다. 최대 몸체 기울기는 `14.220 deg`, 최대 각속도는 `23.717 deg/s`, 최대 gimbal은 `15.000 deg`이고 상태 node 최대 불일치는 물리 단위 기준 약 `1.4e-6`입니다. 이는 단일 명목 궤적이며 성공률, 외란 강건성, 구동기 대역폭, 구조 하중이나 하드웨어 안전 결과가 아닙니다.

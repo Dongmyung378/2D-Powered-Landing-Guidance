@@ -22,6 +22,10 @@ PATH_MARGIN_NAMES = (
     "throttle_high",
     "gimbal_low",
     "gimbal_high",
+    "tilt_low",
+    "tilt_high",
+    "angular_rate_low",
+    "angular_rate_high",
 )
 
 
@@ -58,6 +62,8 @@ class LandingOptimalControlProblem:
     intervals: int
     duration_bounds_s: tuple[float, float]
     max_abs_thrust_angle_rad: float
+    max_abs_tilt_rad: float
+    max_abs_angular_rate_rad_s: float
     min_propellant_reserve_kg: float
     terminal_limits: NDArray[np.float64]
     target_touchdown_vz_m_s: float
@@ -108,6 +114,8 @@ class LandingOptimalControlProblem:
             intervals=int(settings["intervals"]),
             duration_bounds_s=tuple(float(value) for value in settings["duration_s"]),
             max_abs_thrust_angle_rad=float(np.deg2rad(settings["max_abs_thrust_angle_deg"])),
+            max_abs_tilt_rad=float(np.deg2rad(settings["max_abs_tilt_deg"])),
+            max_abs_angular_rate_rad_s=float(np.deg2rad(settings["max_abs_angular_rate_deg_s"])),
             min_propellant_reserve_kg=reserve,
             terminal_limits=limits,
             target_touchdown_vz_m_s=float(settings["target_touchdown_vz_m_s"]),
@@ -160,6 +168,10 @@ class LandingOptimalControlProblem:
                 p.throttle_max - u[0],
                 u[1] + p.gimbal_limit_rad,
                 p.gimbal_limit_rad - u[1],
+                x[4] + self.max_abs_tilt_rad,
+                self.max_abs_tilt_rad - x[4],
+                x[5] + self.max_abs_angular_rate_rad_s,
+                self.max_abs_angular_rate_rad_s - x[5],
             ),
             dtype=np.float64,
         )

@@ -57,7 +57,7 @@ def test_path_and_terminal_constraints_follow_simulator_limits() -> None:
     model = problem()
     p = model.parameters
     margins = model.path_margins(INITIAL, (0.5, 0.0))
-    assert len(margins) == len(PATH_MARGIN_NAMES) == 6
+    assert len(margins) == len(PATH_MARGIN_NAMES) == 10
     assert np.all(margins >= 0.0)
 
     depleted = INITIAL.copy()
@@ -65,6 +65,12 @@ def test_path_and_terminal_constraints_follow_simulator_limits() -> None:
     assert model.path_margins(depleted, (0.5, 0.0))[1] == pytest.approx(-1.0)
     assert model.path_margins(INITIAL, (1.1, 0.0))[3] < 0.0
     assert model.path_margins(INITIAL, (0.5, p.gimbal_limit_rad + 0.01))[5] < 0.0
+    tilted = INITIAL.copy()
+    tilted[4] = model.max_abs_tilt_rad + 0.01
+    assert model.path_margins(tilted, (0.5, 0.0))[7] < 0.0
+    spinning = INITIAL.copy()
+    spinning[5] = -model.max_abs_angular_rate_rad_s - 0.01
+    assert model.path_margins(spinning, (0.5, 0.0))[8] < 0.0
 
     terminal = np.asarray((0.0, 0.0, 0.0, -0.8, 0.0, 0.0, 900.0))
     assert len(model.terminal_violations(terminal)) == len(TERMINAL_RESIDUAL_NAMES) == 6

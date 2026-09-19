@@ -8,14 +8,14 @@ A reproducible 2D reusable-rocket powered-landing project that progresses from r
 
 | Item | Current status |
 |---|---|
-| Roadmap | Week 3 planar-translation optimal-control solver (Day 17) |
+| Roadmap | Week 3 full planar 3-DoF optimal-control solver (Day 18) |
 | Model | Planar 3-DoF with variable mass |
 | State | x, z, vx, vz, theta, omega, mass |
 | Action | throttle, gimbal angle |
 | Current controllers | Suicide-burn, vertical PID, horizontal-attitude, and integrated landing |
 | Runtime | Python 3.12.7 |
 
-The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, a frozen integrated PID baseline, reproducible tuning, isolated-disturbance evaluation, and solved vertical and ideal-vector planar-translation optimal-control problems. Rotation and gimbal dynamics, Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
+The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, a frozen integrated PID baseline, reproducible tuning, isolated-disturbance evaluation, and solved vertical, ideal-vector translation, and full planar 3-DoF optimal-control problems. Objective scaling, mesh studies, Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
 
 ## Optimal-control teacher formulation
 
@@ -37,7 +37,15 @@ python scripts/solve_translation_landing.py --output-dir artifacts/day17-transla
 python scripts/solve_translation_landing.py --guess pid --output-dir artifacts/day17-pid
 ~~~
 
-In the default case, the ideal-vector replay ends about `0.003 m` from the pad, with horizontal velocity `-0.005 m/s` and vertical velocity `-0.902 m/s`. This model directly commands the absolute thrust direction and resets the replay heading between control intervals; it does **not** prove a feasible attitude/gimbal trajectory. Day 18 adds those physical constraints. See the [Day 17 specification](docs/spec.md#23-day-17-planar-translation-teacher) or [Korean version](docs/spec.ko.md#17일차-평면-병진-teacher).
+In the default case, the ideal-vector replay ends about `0.003 m` from the pad, with horizontal velocity `-0.005 m/s` and vertical velocity `-0.902 m/s`. This model directly commands the absolute thrust direction and resets the replay heading between control intervals; it does **not** prove a feasible attitude/gimbal trajectory. See the [Day 17 specification](docs/spec.md#23-day-17-planar-translation-teacher) or [Korean version](docs/spec.ko.md#17일차-평면-병진-teacher).
+
+Day 18 replaces that idealization with the complete `x, z, vx, vz, theta, omega, mass` state and physical throttle/gimbal controls. The solver enforces the 20-degree body-tilt, 15-degree gimbal, and 30 deg/s angular-rate limits, including final attitude and rate constraints. A PID episode supplies only the initial guess; both optimization stages and the independent full-model replay are checked separately.
+
+~~~bash
+python scripts/solve_planar_landing.py --output-dir artifacts/day18-planar-3dof
+~~~
+
+The default demonstration starts at `x=10 m`, `z=100 m`, `vz=-20 m/s`, `theta=3 deg`, and `omega=-1 deg/s`. The 100-interval solution finishes in `5.000 s` at approximately `x=0.010 m`, `vx=-0.019 m/s`, `vz=-0.975 m/s`, `theta=0.074 deg`, and `omega=-0.019 deg/s`, using `27.839 kg` of propellant. Peak body tilt is `14.220 deg`, peak angular rate is `23.717 deg/s`, and peak gimbal reaches `15.000 deg`. This is one nominal, wind-free solution with instantaneous actuators, not a robustness or hardware-safety result. See the [Day 18 specification](docs/spec.md#24-day-18-full-planar-3-dof-teacher) or [Korean version](docs/spec.ko.md#18일차-전체-평면-3자유도-teacher).
 
 ## Frozen Week 2 PID baseline
 

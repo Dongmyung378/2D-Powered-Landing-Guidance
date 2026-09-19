@@ -211,6 +211,8 @@ optimal_control:
   intervals: 100
   duration_s: [5.0, 25.0]
   max_abs_thrust_angle_deg: 15.0
+  max_abs_tilt_deg: 20.0
+  max_abs_angular_rate_deg_s: 30.0
   min_propellant_reserve_kg: 1.0
   target_touchdown_vz_m_s: -0.8
   feasibility_tolerance: 0.001

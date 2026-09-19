@@ -482,6 +482,16 @@ def validate_config(config: Config) -> None:
         angle_limit = _positive(optimal, "max_abs_thrust_angle_deg")
         if angle_limit > 45.0:
             raise ConfigError("optimal_control.max_abs_thrust_angle_deg must not exceed 45")
+        tilt_limit = _positive(optimal, "max_abs_tilt_deg")
+        if tilt_limit > 90.0:
+            raise ConfigError("optimal_control.max_abs_tilt_deg must not exceed 90")
+        if tilt_limit < landing["max_abs_theta_deg"]:
+            raise ConfigError("optimal_control max tilt must include the landing attitude limit")
+        angular_rate_limit = _positive(optimal, "max_abs_angular_rate_deg_s")
+        if angular_rate_limit < landing["max_abs_omega_deg_s"]:
+            raise ConfigError(
+                "optimal_control angular-rate limit must include the landing angular-rate limit"
+            )
         reserve = _positive(optimal, "min_propellant_reserve_kg")
         if reserve >= initial_values["mass_kg"] - dry_mass:
             raise ConfigError("optimal_control reserve must be below initial propellant")

@@ -442,7 +442,7 @@ The command writes a JSON benchmark report, two replayable episode logs, and two
 
 ## 21. Day 15 optimal-control teacher formulation
 
-The seven-state teacher problem is defined in `LandingOptimalControlProblem` but the full planar problem is **not solved yet**. Day 16 adds a solver for its vertical subset only. The Day 15 model is a nominal, wind-free, sensor-perfect, instantaneous-actuator model. It uses the same planar state ordering, units, force direction, torque sign, variable-mass law, and landing thresholds as the simulator. The simulator's optional aerodynamic drag is absent because no wind model is supplied in nominal rollouts. The nonlinear-program equations do not clip actions or switch thrust off at dry mass; hard actuator bounds and a 1 kg propellant reserve keep feasible trajectories strictly inside that smooth region.
+The seven-state teacher problem is defined in `LandingOptimalControlProblem`. Day 16 first solved its vertical subset, Day 17 solved an ideal-vector translational subset, and Day 18 solves the complete planar problem. The model is nominal, wind-free, sensor-perfect, and uses instantaneous actuators. It uses the same planar state ordering, units, force direction, torque sign, variable-mass law, and landing thresholds as the simulator. The simulator's optional aerodynamic drag is absent because no wind model is supplied in nominal rollouts. The nonlinear-program equations do not clip actions or switch thrust off at dry mass; hard actuator bounds and a 1 kg propellant reserve keep feasible trajectories strictly inside that smooth region.
 
 The state is `X = [x, z, vx, vz, theta, omega, m]` and the control is `U = [q, delta]`, where `q` is dimensionless throttle and `delta` is the gimbal angle in radians. The optimization uses `N = 100` piecewise-constant control intervals. Final time `T` is a decision variable in `[5, 25] s`, with mesh step `h = T/N`. The initial state is fixed to the supplied state. Units are SI throughout; `theta` and `delta` are positive clockwise toward `+x` under the project convention.
 
@@ -454,7 +454,7 @@ The state is `X = [x, z, vx, vz, theta, omega, m]` and the control is `U = [q, d
 | Rotation | `dtheta/dt = omega`; `domega/dt = -L F sin(delta)/I` | derivative elements 4-5; negative torque sign matches the simulator |
 | Propellant | `dm/dt = -F/(Isp g0)` | derivative element 6 |
 | Multiple-shooting defect | `X[k+1] - RK4(X[k], U[k], T/N) = 0` | `rk4_defects(states, controls, T)` returns an `N x 7` matrix |
-| Path margins | `z-ground >= 0`; `m-dry_mass-1 kg >= 0`; `q_min <= q <= q_max`; `|delta| <= delta_max` | `path_margins(X, U)` returns six nonnegative-required values; state bounds also apply at the final node |
+| Path margins | `z-ground >= 0`; `m-dry_mass-1 kg >= 0`; `q_min <= q <= q_max`; `|delta| <= delta_max`; `|theta| <= 20 deg`; `|omega| <= 30 deg/s` | `path_margins(X, U)` returns ten nonnegative-required values; state bounds also apply at the final node |
 | Terminal landing | `z(T)=ground`; `|x(T)-target_x|<=1 m`; `|vx(T)|<=1 m/s`; `-2<=vz(T)<=0 m/s`; `|theta(T)|<=5 deg`; `|omega(T)|<=5 deg/s` | `terminal_violations(X_T)` returns six normalized nonnegative values; zero means each terminal bound holds |
 
 The Stage A violation of the terminal-height equality is normalized by a fixed 1 m scale. The terminal descent constraint intentionally excludes upward ground contact. The simulator uses point contact and has no landing-leg or impact-load model. The path constraints apply at shooting nodes; a solver result must still be rolled out in the event-driven simulator because node feasibility alone cannot rule out between-node ground penetration or other transcription error.
@@ -511,4 +511,23 @@ python scripts/solve_translation_landing.py --guess pid --output-dir artifacts/d
 python scripts/solve_translation_landing.py --initial-x -12 --initial-vx 1 --output-dir artifacts/day17-custom
 ~~~
 
-The default single-case start is `x=10 m`, `z=100 m`, `vx=0`, `vz=-20 m/s`, `m=1000 kg`. Both the analytic and PID-seeded runs converge. The analytic-seeded ideal-vector replay ends at approximately `x=0.003 m`, `vx=-0.005 m/s`, `vz=-0.902 m/s`, consuming `27.605 kg` in `5.000 s`. This demonstrates horizontal-error correction for one initial condition, not a distribution-level success rate. Day 18 will introduce `theta`, `omega`, gimbal torque, and attitude limits.
+The default single-case start is `x=10 m`, `z=100 m`, `vx=0`, `vz=-20 m/s`, `m=1000 kg`. Both the analytic and PID-seeded runs converge. The analytic-seeded ideal-vector replay ends at approximately `x=0.003 m`, `vx=-0.005 m/s`, `vz=-0.902 m/s`, consuming `27.605 kg` in `5.000 s`. This demonstrates horizontal-error correction for one initial condition, not a distribution-level success rate. Day 18 removes the heading-reset assumption and solves the physical attitude and gimbal trajectory.
+
+## 24. Day 18 full planar 3-DoF teacher
+
+Day 18 solves the complete state `X=[x,z,vx,vz,theta,omega,m]` with physical controls `U=[q,delta]`. Unlike Day 17, `delta` is the gimbal angle relative to the body. Translation uses the inertial thrust direction `theta+delta`; rotation uses `dtheta/dt=omega` and `domega/dt=-L*T_max*q*sin(delta)/I`. The symbolic CasADi derivative was checked against the existing simulator derivative under the same state and action.
+
+The direct multiple-shooting problem retains 100 piecewise-constant control intervals and a free final time in `[5,25] s`. Every shooting node enforces altitude, dry-mass-plus-1-kg reserve, body tilt `|theta|<=20 deg`, and angular rate `|omega|<=30 deg/s`. Every control enforces physical throttle and `|delta|<=15 deg`. Stage A temporarily relaxes all six landing conditions with normalized nonnegative slacks. Stage B fixes height to ground and imposes the configured position, velocity, attitude, and angular-rate landing limits as hard constraints before minimizing the original fuel, touchdown, and control-change objective.
+
+The integrated PID controller runs once from the requested initial state to provide a practical initial control sequence. Those controls are sampled on the optimization mesh and reintegrated with the seven-state RK4 model, so the initial node sequence is dynamically consistent. The PID outcome is saved as provenance only; an accepted teacher still requires IPOPT convergence, independently recomputed hard and terminal residuals below `0.001`, and a separate fine-step simulator replay.
+
+Failure reports identify the failed stage, IPOPT status, largest named violation, the full hard-constraint breakdown, all six terminal violations, and state-by-state RK4 defects. A solver failure therefore distinguishes missed altitude, fuel, actuator, tilt, angular-rate, duration, dynamics, and terminal conditions instead of recording only a generic infeasible status.
+
+The independent replay carries `theta` and `omega` continuously between intervals and applies the optimized gimbal directly through `simulate_planar`; it never resets heading. Validation checks all terminal conditions, between-node altitude, fuel reserve, tilt, angular rate, gimbal magnitude, and the disagreement at every shooting node. The report and plot refuse to overwrite existing files.
+
+~~~bash
+python scripts/solve_planar_landing.py --output-dir artifacts/day18-planar-3dof
+python scripts/solve_planar_landing.py --initial-x -8 --initial-theta-deg -2 --initial-omega-deg-s 1 --output-dir artifacts/day18-custom
+~~~
+
+The default case starts at `x=10 m`, `z=100 m`, `vx=0`, `vz=-20 m/s`, `theta=3 deg`, `omega=-1 deg/s`, and `m=1000 kg`. Both stages return `Solve_Succeeded`. The full-model replay ends after `5.000 s` at approximately `x=0.010 m`, `vx=-0.019 m/s`, `vz=-0.975 m/s`, `theta=0.074 deg`, and `omega=-0.019 deg/s`, using `27.839 kg` of propellant. Peak body tilt is `14.220 deg`, peak angular rate is `23.717 deg/s`, and peak gimbal is `15.000 deg`. Maximum state-node disagreement is about `1.4e-6` in physical units. This is one nominal trajectory, not a success-rate, disturbance-robustness, actuator-bandwidth, structural-load, or hardware-safety claim.
