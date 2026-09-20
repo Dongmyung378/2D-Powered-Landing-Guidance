@@ -95,6 +95,35 @@ def test_config_rejects_invalid_optimal_control_settings(path, value, message) -
         plg.validate_config(config)
 
 
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("mesh_intervals",), [25, 25, 50], "mesh_intervals"),
+        (("replay_dt_s",), 0.02, "replay_dt_s"),
+        (("final_state_tolerances", "x_m"), 0.0, "x_m"),
+        (
+            ("objective_profiles", "baseline", "fuel"),
+            2.0,
+            "baseline weights",
+        ),
+        (
+            ("objective_profiles", "smooth_control", "smoothness"),
+            0.001,
+            "smoothness weights",
+        ),
+    ],
+)
+def test_config_rejects_invalid_optimal_control_study(path, value, message) -> None:
+    config = deepcopy(plg.load_config(ROOT / "configs/pid-baseline-v1.yaml"))
+    target = config["optimal_control"]["study"]
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+
+    with pytest.raises(plg.ConfigError, match=message):
+        plg.validate_config(config)
+
+
 def test_config_rejects_initial_mass_below_dry_mass() -> None:
     config = deepcopy(plg.load_config(DEFAULT_CONFIG))
     config["initial_state"]["mass_kg"] = config["vehicle"]["dry_mass_kg"] - 1.0

@@ -470,14 +470,15 @@ touchdown_error = mean([
     (theta_final / theta_limit)^2,
     (omega_final / omega_limit)^2,
 ])
+control_step = T / N
 smoothness = mean over k=1..N-1 of [
-    ((q[k] - q[k-1]) / (q_max - q_min))^2
-    + ((delta[k] - delta[k-1]) / (2 delta_max))^2
+    ((q[k] - q[k-1]) / (control_step * 2 s^-1))^2
+    + ((delta[k] - delta[k-1]) / (control_step * deg2rad(60) s^-1))^2
 ]
 J = 1.0 * fuel_fraction + 0.1 * touchdown_error + 0.01 * smoothness
 ~~~
 
-The target terminal vertical velocity is `-0.8 m/s`, within the simulator's `[-2, 0] m/s` safe-descending interval. Every cost term is dimensionless. Stage B's fuel fraction uses the propellant available in the particular initial state, not the vehicle's nominal 250 kg capacity. The weights are explicit initial modeling choices, not tuned or validated performance claims. A candidate is not a teacher trajectory until a solver reports convergence, constraint residuals are checked, and independent simulator rollout agrees.
+The target terminal vertical velocity is `-0.8 m/s`, within the simulator's `[-2, 0] m/s` safe-descending interval. Every cost term is dimensionless. Stage B's fuel fraction uses the propellant available in the particular initial state, not the vehicle's nominal 250 kg capacity. The two control-rate scales come from the integrated controller's configured slew references. Dividing by the mesh step makes the same physical control ramp carry the same smoothness cost at different node counts. These references are soft objective scales, not hard rate bounds. A candidate is not a teacher trajectory until a solver reports convergence, constraint residuals are checked, and independent simulator rollout agrees.
 
 ## 22. Day 16 vertical CasADi/IPOPT teacher
 
@@ -530,4 +531,33 @@ python scripts/solve_planar_landing.py --output-dir artifacts/day18-planar-3dof
 python scripts/solve_planar_landing.py --initial-x -8 --initial-theta-deg -2 --initial-omega-deg-s 1 --output-dir artifacts/day18-custom
 ~~~
 
-The default case starts at `x=10 m`, `z=100 m`, `vx=0`, `vz=-20 m/s`, `theta=3 deg`, `omega=-1 deg/s`, and `m=1000 kg`. Both stages return `Solve_Succeeded`. The full-model replay ends after `5.000 s` at approximately `x=0.010 m`, `vx=-0.019 m/s`, `vz=-0.975 m/s`, `theta=0.074 deg`, and `omega=-0.019 deg/s`, using `27.839 kg` of propellant. Peak body tilt is `14.220 deg`, peak angular rate is `23.717 deg/s`, and peak gimbal is `15.000 deg`. Maximum state-node disagreement is about `1.4e-6` in physical units. This is one nominal trajectory, not a success-rate, disturbance-robustness, actuator-bandwidth, structural-load, or hardware-safety claim.
+The default case starts at `x=10 m`, `z=100 m`, `vx=0`, `vz=-20 m/s`, `theta=3 deg`, `omega=-1 deg/s`, and `m=1000 kg`. Both stages return `Solve_Succeeded`. With the current Day 19 objective, the full-model replay ends after `5.000 s` at approximately `x=0.012 m`, `vx=-0.023 m/s`, `vz=-0.974 m/s`, `theta=0.101 deg`, and `omega=-0.028 deg/s`, using `27.907 kg` of propellant. Peak body tilt is `15.749 deg`, peak angular rate is `21.680 deg/s`, and peak gimbal is `14.671 deg`. Maximum state-node disagreement is below `9e-7` in physical units. This is one nominal trajectory, not a success-rate, disturbance-robustness, actuator-bandwidth, structural-load, or hardware-safety claim.
+
+## 25. Day 19 objective and numerical-stability study
+
+Day 19 turns the full-planar Stage B objective into a mesh-comparable experiment. `ObjectiveScales` records the available fuel, five terminal landing limits, and the two configured control-rate references. The solver and the post-solve evaluator use the same normalized fuel, touchdown, and rate-based smoothness definitions. A regression test applies the same linear control ramp on two meshes and verifies equal smoothness cost.
+
+The configured sweep keeps the fuel and touchdown weights fixed at `1.0` and `0.1`, then tests smoothness weights `0.001`, `0.01`, and `0.1`. The default initial condition is the Day 18 case. The measured trade-off was:
+
+| Profile | Fuel used | Smoothness term | Peak throttle rate | Peak gimbal rate |
+|---|---:|---:|---:|---:|
+| Fuel priority | 27.858 kg | 0.11080 | 1.479/s | 50.013 deg/s |
+| Baseline | 27.907 kg | 0.04708 | 0.697/s | 23.824 deg/s |
+| Smooth control | 28.003 kg | 0.02661 | 0.478/s | 11.685 deg/s |
+
+The baseline weights are then solved at `N=25, 50, 100, 200`. Each optimized control sequence is replayed through the existing event-driven simulator at `0.005 s`, rather than accepted from transcription nodes alone. Final-state differences between the optimization and replay must be no greater than `0.001 m` for `x,z`, `0.001 m/s` for `vx,vz`, `0.01 deg` for `theta`, `0.01 deg/s` for `omega`, and `0.001 kg` for mass. The replay must also satisfy the landing constraints and preserve altitude and propellant reserve.
+
+| Intervals | Measured solve time | Largest final error / tolerance | Replay result |
+|---:|---:|---:|---|
+| 25 | 0.613 s | 0.231 | pass |
+| 50 | 0.872 s | 0.0140 | pass |
+| 100 | 1.476 s | 0.000870 | pass |
+| 200 | 2.618 s | 0.00101 | pass |
+
+All configured cases passed the Day 19 completion gate. The error is not required to decrease strictly at every refinement because solver tolerances, adaptive replay integration, and interpolation also contribute; both 100- and 200-interval disagreements are roughly one-thousandth of the allowed error. Solve times are measurements from one development run and are not performance guarantees. The study demonstrates nominal transcription agreement for one initial condition. It does not impose hard throttle/gimbal rate constraints or establish robustness across initial conditions; Day 20 addresses the latter with a multi-initial-condition pipeline.
+
+~~~bash
+python scripts/analyze_optimal_control.py --output-dir artifacts/day19-study
+~~~
+
+The command writes a JSON report containing all settings, objective components, solver iterations, physical final/node errors, and the completion gate. It also writes a four-panel PNG for the trade-off, normalized peak rates, mesh timing, and normalized replay error. Existing output files are never overwritten.

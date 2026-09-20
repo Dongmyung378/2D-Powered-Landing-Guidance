@@ -90,6 +90,8 @@ def test_full_planar_solver_lands_with_attitude_and_rate_limits() -> None:
     assert result.stage_b.status == "Solve_Succeeded"
     assert result.stage_a.max_terminal_violation <= model.feasibility_tolerance
     assert result.stage_b.max_hard_violation <= model.feasibility_tolerance
+    objective = model.objective(result.states[-1], result.controls, result.duration_s)
+    assert result.stage_b.objective == pytest.approx(objective.weighted_total, abs=1e-8)
     assert np.max(model.terminal_violations(final)) <= model.feasibility_tolerance
     assert np.min(result.rollout_states[:, 1]) >= model.ground_z_m - 1e-3
     assert np.max(np.abs(result.rollout_states[:, 4])) <= model.max_abs_tilt_rad + 1e-6

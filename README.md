@@ -8,14 +8,14 @@ A reproducible 2D reusable-rocket powered-landing project that progresses from r
 
 | Item | Current status |
 |---|---|
-| Roadmap | Week 3 full planar 3-DoF optimal-control solver (Day 18) |
+| Roadmap | Week 3 objective and numerical-stability tuning (Day 19) |
 | Model | Planar 3-DoF with variable mass |
 | State | x, z, vx, vz, theta, omega, mass |
 | Action | throttle, gimbal angle |
 | Current controllers | Suicide-burn, vertical PID, horizontal-attitude, and integrated landing |
 | Runtime | Python 3.12.7 |
 
-The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, a frozen integrated PID baseline, reproducible tuning, isolated-disturbance evaluation, and solved vertical, ideal-vector translation, and full planar 3-DoF optimal-control problems. Objective scaling, mesh studies, Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
+The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, a frozen integrated PID baseline, reproducible tuning, isolated-disturbance evaluation, and solved vertical, ideal-vector translation, and full planar 3-DoF optimal-control problems. The full planar objective now has explicit physical scales, a measured fuel/smoothness trade-off, a four-mesh numerical study, and fine-step simulator replay checks. Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
 
 ## Optimal-control teacher formulation
 
@@ -45,7 +45,23 @@ Day 18 replaces that idealization with the complete `x, z, vx, vz, theta, omega,
 python scripts/solve_planar_landing.py --output-dir artifacts/day18-planar-3dof
 ~~~
 
-The default demonstration starts at `x=10 m`, `z=100 m`, `vz=-20 m/s`, `theta=3 deg`, and `omega=-1 deg/s`. The 100-interval solution finishes in `5.000 s` at approximately `x=0.010 m`, `vx=-0.019 m/s`, `vz=-0.975 m/s`, `theta=0.074 deg`, and `omega=-0.019 deg/s`, using `27.839 kg` of propellant. Peak body tilt is `14.220 deg`, peak angular rate is `23.717 deg/s`, and peak gimbal reaches `15.000 deg`. This is one nominal, wind-free solution with instantaneous actuators, not a robustness or hardware-safety result. See the [Day 18 specification](docs/spec.md#24-day-18-full-planar-3-dof-teacher) or [Korean version](docs/spec.ko.md#18일차-전체-평면-3자유도-teacher).
+The default demonstration starts at `x=10 m`, `z=100 m`, `vz=-20 m/s`, `theta=3 deg`, and `omega=-1 deg/s`. With the Day 19 rate-normalized objective, the 100-interval solution finishes in `5.000 s` at approximately `x=0.012 m`, `vx=-0.023 m/s`, `vz=-0.974 m/s`, `theta=0.101 deg`, and `omega=-0.028 deg/s`, using `27.907 kg` of propellant. Peak body tilt is `15.749 deg`, peak angular rate is `21.680 deg/s`, and peak gimbal is `14.671 deg`. This is one nominal, wind-free solution with instantaneous actuators, not a robustness or hardware-safety result. See the [Day 18 specification](docs/spec.md#24-day-18-full-planar-3-dof-teacher) or [Korean version](docs/spec.ko.md#18일차-전체-평면-3자유도-teacher).
+
+## Day 19 objective and numerical study
+
+Day 19 makes every full-planar Stage B term dimensionless with explicit physical scales. Fuel is divided by available propellant, touchdown errors by their landing limits, and consecutive control changes by mesh step and the `2 throttle/s` and `60 deg/s` controller reference rates. This removes the previous mesh-size dependence from the smoothness cost. Three weight profiles expose the fuel/smoothness trade-off, while the baseline profile is solved on 25, 50, 100, and 200 control intervals. Every result is replayed at `0.005 s` through the independent simulator.
+
+~~~bash
+python scripts/analyze_optimal_control.py --output-dir artifacts/day19-study
+~~~
+
+| Smoothness weight | Fuel used | Peak throttle rate | Peak gimbal rate |
+|---|---:|---:|---:|
+| 0.001, fuel priority | 27.858 kg | 1.479/s | 50.013 deg/s |
+| 0.01, baseline | 27.907 kg | 0.697/s | 23.824 deg/s |
+| 0.1, smooth control | 28.003 kg | 0.478/s | 11.685 deg/s |
+
+All four mesh replays passed the per-state final-difference tolerances of `0.001 m`, `0.001 m/s`, `0.01 deg`, `0.01 deg/s`, and `0.001 kg`. The largest final error-to-tolerance ratio fell from `0.231` at 25 intervals to `8.70e-4` at 100 intervals; the measured solve time increased from `0.613 s` to `2.618 s` between 25 and 200 intervals on the development machine. These timings are comparative measurements, not runtime guarantees. Smoothness remains a soft objective, so the reference rates are not hard actuator constraints. See the [Day 19 specification](docs/spec.md#25-day-19-objective-and-numerical-stability-study) or [Korean version](docs/spec.ko.md#19일차-목적함수와-수치-안정성-연구).
 
 ## Frozen Week 2 PID baseline
 
@@ -342,7 +358,7 @@ The tracked repository contains only source code, reproducible configuration, te
 
 - Week 1: simulator, event handling, logging, replay, and numerical verification - complete
 - Week 2: suicide-burn and frozen PID baseline - complete
-- Week 3: constrained optimal-control teacher - planar translation complete, rotation pending
+- Week 3: constrained optimal-control teacher - full planar solver and Day 19 tuning complete; multi-initial-condition pipeline next
 - Week 4: dataset generation and Behavior Cloning
 - Week 5: DAgger closed-loop improvement
 - Week 6: disturbances and Monte Carlo evaluation
@@ -354,6 +370,7 @@ The tracked repository contains only source code, reproducible configuration, te
 - Disturbances are evaluated one at a time; coupled wind, sensing, and actuator failures are not covered yet.
 - Aerodynamic drag is a point-force model without aerodynamic torque, lift, altitude-varying density, or turbulence.
 - Sensor errors are independent zero-mean Gaussian samples, and engine lag currently affects throttle only.
+- Throttle and gimbal rates are penalized but not yet enforced as hard actuator-rate constraints.
 - Ground contact uses a point model without landing-leg or structural-impact dynamics.
 - The 2 m/s success threshold is a simulation criterion, not a hardware safety guarantee.
 

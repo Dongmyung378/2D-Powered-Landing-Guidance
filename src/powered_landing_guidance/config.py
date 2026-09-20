@@ -509,6 +509,56 @@ def validate_config(config: Config) -> None:
         for key in ("fuel", "touchdown", "smoothness"):
             _positive(weights, key)
 
+        study = _mapping(optimal, "study")
+        mesh_intervals = study.get("mesh_intervals")
+        if (
+            not isinstance(mesh_intervals, list)
+            or len(mesh_intervals) < 3
+            or any(
+                isinstance(value, bool) or not isinstance(value, int) or value <= 0
+                for value in mesh_intervals
+            )
+            or any(
+                later <= earlier
+                for earlier, later in zip(mesh_intervals, mesh_intervals[1:], strict=False)
+            )
+        ):
+            raise ConfigError("optimal_control study mesh_intervals must increase")
+        replay_dt = _positive(study, "replay_dt_s")
+        if replay_dt >= dt:
+            raise ConfigError("optimal_control study replay_dt_s must be below simulation.dt_s")
+        tolerances = _mapping(study, "final_state_tolerances")
+        expected_tolerances = {
+            "x_m",
+            "z_m",
+            "vx_m_s",
+            "vz_m_s",
+            "theta_deg",
+            "omega_deg_s",
+            "mass_kg",
+        }
+        if set(tolerances) != expected_tolerances:
+            raise ConfigError("optimal_control study final-state tolerance keys are invalid")
+        for key in expected_tolerances:
+            _positive(tolerances, key)
+        profiles = _mapping(study, "objective_profiles")
+        expected_profiles = {"fuel_priority", "baseline", "smooth_control"}
+        if set(profiles) != expected_profiles:
+            raise ConfigError("optimal_control study objective profiles are invalid")
+        for name, profile in profiles.items():
+            if not isinstance(profile, dict) or set(profile) != {"fuel", "touchdown", "smoothness"}:
+                raise ConfigError(f"optimal_control study profile {name} has invalid weights")
+            for key in ("fuel", "touchdown", "smoothness"):
+                _positive(profile, key)
+        if profiles["baseline"] != weights:
+            raise ConfigError("optimal_control study baseline weights must match objective_weights")
+        if not (
+            profiles["fuel_priority"]["smoothness"]
+            < profiles["baseline"]["smoothness"]
+            < profiles["smooth_control"]["smoothness"]
+        ):
+            raise ConfigError("optimal_control study smoothness weights must increase")
+
     baseline_protocol = config.get("baseline_protocol")
     if baseline_protocol is not None:
         if not isinstance(baseline_protocol, dict):

@@ -230,23 +230,22 @@ def _stage_b_objective(
     problem: LandingOptimalControlProblem,
     final,
     controls,
+    duration,
 ):
-    p = problem.parameters
-    x_limit, vx_limit, vz_limit, theta_limit, omega_limit = (
-        float(value) for value in problem.terminal_limits
-    )
-    fuel = (problem.initial_state.mass - final[6]) / (problem.initial_state.mass - p.dry_mass_kg)
+    scales = problem.objective_scales
+    fuel = (problem.initial_state.mass - final[6]) / scales.fuel_kg
     touchdown = (
-        ((final[0] - problem.target_x_m) / x_limit) ** 2
-        + (final[2] / vx_limit) ** 2
-        + ((final[3] - problem.target_touchdown_vz_m_s) / vz_limit) ** 2
-        + (final[4] / theta_limit) ** 2
-        + (final[5] / omega_limit) ** 2
+        ((final[0] - problem.target_x_m) / scales.x_m) ** 2
+        + (final[2] / scales.vx_m_s) ** 2
+        + ((final[3] - problem.target_touchdown_vz_m_s) / scales.vz_m_s) ** 2
+        + (final[4] / scales.theta_rad) ** 2
+        + (final[5] / scales.omega_rad_s) ** 2
     ) / 5
     if problem.intervals > 1:
+        step_s = duration / problem.intervals
         smoothness = (
-            ca.sumsqr((controls[0, 1:] - controls[0, :-1]) / (p.throttle_max - p.throttle_min))
-            + ca.sumsqr((controls[1, 1:] - controls[1, :-1]) / (2 * p.gimbal_limit_rad))
+            ca.sumsqr((controls[0, 1:] - controls[0, :-1]) / step_s / scales.throttle_rate_per_s)
+            + ca.sumsqr((controls[1, 1:] - controls[1, :-1]) / step_s / scales.gimbal_rate_rad_s)
         ) / (problem.intervals - 1)
     else:
         smoothness = 0
@@ -298,7 +297,7 @@ def _build_problem(
         opti.set_initial(slack, problem.terminal_violations(guess.states[-1]))
     else:
         _add_terminal_constraints(opti, final, problem)
-        opti.minimize(_stage_b_objective(problem, final, controls))
+        opti.minimize(_stage_b_objective(problem, final, controls, duration))
 
     opti.set_initial(states, guess.states.T)
     opti.set_initial(controls, guess.controls.T)

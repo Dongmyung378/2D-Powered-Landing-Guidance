@@ -89,7 +89,7 @@ def test_objective_terms_are_dimensionless_and_separate_from_feasibility() -> No
     model = problem()
     terminal = np.asarray((0.0, 0.0, 0.0, -0.8, 0.0, 0.0, 950.0))
     controls = np.tile((0.5, 0.0), (model.intervals, 1))
-    terms = model.objective(terminal, controls)
+    terms = model.objective(terminal, controls, 5.0)
 
     assert terms.fuel == pytest.approx(0.2)
     assert terms.touchdown == 0.0
@@ -97,9 +97,33 @@ def test_objective_terms_are_dimensionless_and_separate_from_feasibility() -> No
     assert terms.weighted_total == pytest.approx(model.fuel_weight * 0.2)
 
     controls[1, 0] = 0.8
-    assert model.objective(terminal, controls).smoothness > 0.0
+    assert model.objective(terminal, controls, 5.0).smoothness > 0.0
     terminal[0] = 0.5
-    assert model.objective(terminal, controls).touchdown > 0.0
+    assert model.objective(terminal, controls, 5.0).touchdown > 0.0
+
+
+def test_rate_based_smoothness_is_independent_of_mesh_spacing() -> None:
+    terminal = np.asarray((0.0, 0.0, 0.0, -0.8, 0.0, 0.0, 950.0))
+    smoothness = []
+    for intervals in (10, 20):
+        config = deepcopy(CONFIG)
+        config["optimal_control"]["intervals"] = intervals
+        model = LandingOptimalControlProblem.from_config(config, INITIAL)
+        duration_s = 5.0
+        sample_times = np.arange(intervals) * duration_s / intervals
+        controls = np.column_stack(
+            (
+                0.4 + 0.02 * sample_times,
+                np.deg2rad(1.0) * sample_times,
+            )
+        )
+        smoothness.append(model.objective(terminal, controls, duration_s).smoothness)
+
+    assert smoothness[0] == pytest.approx(smoothness[1])
+    scales = problem().objective_scales
+    assert scales.fuel_kg == pytest.approx(250.0)
+    assert scales.throttle_rate_per_s == pytest.approx(2.0)
+    assert np.rad2deg(scales.gimbal_rate_rad_s) == pytest.approx(60.0)
 
 
 def test_free_horizon_rk4_defects_match_independent_simulator_rollout() -> None:
@@ -124,6 +148,7 @@ def test_free_horizon_rk4_defects_match_independent_simulator_rollout() -> None:
     defects = model.rk4_defects(np.asarray(states), controls, duration)
     assert defects.shape == (4, 7)
     np.testing.assert_allclose(defects, 0.0, atol=1e-12)
+    assert model.mesh_step_s(5.0 - 1e-8) == pytest.approx(5.0 / model.intervals)
     with pytest.raises(ValueError, match="duration_s"):
         model.mesh_step_s(30.0)
 
@@ -138,4 +163,4 @@ def test_problem_rejects_exhausted_initial_state_and_bad_arrays() -> None:
     with pytest.raises(ValueError, match="action"):
         model.dynamics(INITIAL, (np.nan, 0.0))
     with pytest.raises(ValueError, match="controls"):
-        model.objective(INITIAL, np.zeros((model.intervals - 1, 2)))
+        model.objective(INITIAL, np.zeros((model.intervals - 1, 2)), 5.0)

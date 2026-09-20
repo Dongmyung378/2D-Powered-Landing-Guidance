@@ -47,6 +47,20 @@ class ObjectiveTerms:
 
 
 @dataclass(frozen=True, slots=True)
+class ObjectiveScales:
+    """Physical reference scales used to make every objective term dimensionless."""
+
+    fuel_kg: float
+    x_m: float
+    vx_m_s: float
+    vz_m_s: float
+    theta_rad: float
+    omega_rad_s: float
+    throttle_rate_per_s: float
+    gimbal_rate_rad_s: float
+
+
+@dataclass(frozen=True, slots=True)
 class LandingOptimalControlProblem:
     """Continuous model and constraints for a free-duration, fixed-node OCP.
 
@@ -71,6 +85,8 @@ class LandingOptimalControlProblem:
     fuel_weight: float
     touchdown_weight: float
     smoothness_weight: float
+    throttle_rate_scale_per_s: float
+    gimbal_rate_scale_rad_s: float
 
     @classmethod
     def from_config(
@@ -106,6 +122,7 @@ class LandingOptimalControlProblem:
         )
         limits.flags.writeable = False
         weights = settings["objective_weights"]
+        slew_rates = config["integrated_landing_controller"]["slew_rates"]
         return cls(
             initial_state=state,
             parameters=parameters,
@@ -123,15 +140,33 @@ class LandingOptimalControlProblem:
             fuel_weight=float(weights["fuel"]),
             touchdown_weight=float(weights["touchdown"]),
             smoothness_weight=float(weights["smoothness"]),
+            throttle_rate_scale_per_s=float(slew_rates["throttle_per_s"]),
+            gimbal_rate_scale_rad_s=float(np.deg2rad(slew_rates["gimbal_deg_s"])),
+        )
+
+    @property
+    def objective_scales(self) -> ObjectiveScales:
+        """Return the explicit physical scales behind the normalized objective."""
+        x_limit, vx_limit, vz_limit, theta_limit, omega_limit = self.terminal_limits
+        return ObjectiveScales(
+            fuel_kg=self.initial_state.mass - self.parameters.dry_mass_kg,
+            x_m=float(x_limit),
+            vx_m_s=float(vx_limit),
+            vz_m_s=float(vz_limit),
+            theta_rad=float(theta_limit),
+            omega_rad_s=float(omega_limit),
+            throttle_rate_per_s=self.throttle_rate_scale_per_s,
+            gimbal_rate_rad_s=self.gimbal_rate_scale_rad_s,
         )
 
     def mesh_step_s(self, duration_s: float) -> float:
         """Return h = T/N after checking the free-horizon decision bound."""
         duration = float(duration_s)
         low, high = self.duration_bounds_s
-        if not np.isfinite(duration) or not low <= duration <= high:
+        tolerance = np.finfo(np.float64).eps ** 0.5 * max(1.0, abs(low), abs(high))
+        if not np.isfinite(duration) or duration < low - tolerance or duration > high + tolerance:
             raise ValueError(f"duration_s must be finite and within [{low}, {high}]")
-        return duration / self.intervals
+        return float(np.clip(duration, low, high)) / self.intervals
 
     def dynamics(self, state: ArrayLike, action: ArrayLike) -> NDArray[np.float64]:
         """Return the smooth nominal derivative in simulator state order."""
@@ -205,32 +240,32 @@ class LandingOptimalControlProblem:
         self,
         terminal_state: ArrayLike,
         controls: ArrayLike,
+        duration_s: float,
     ) -> ObjectiveTerms:
         """Stage B cost, meaningful only after all hard constraints are satisfied."""
         x = _vector(terminal_state, 7, "terminal_state")
         u = np.asarray(controls, dtype=np.float64)
         if u.shape != (self.intervals, 2) or not np.all(np.isfinite(u)):
             raise ValueError(f"controls must have shape ({self.intervals}, 2) and be finite")
-        p = self.parameters
-        available_fuel = self.initial_state.mass - p.dry_mass_kg
-        fuel = float((self.initial_state.mass - x[6]) / available_fuel)
-        x_limit, vx_limit, vz_limit, theta_limit, omega_limit = self.terminal_limits
+        step_s = self.mesh_step_s(duration_s)
+        scales = self.objective_scales
+        fuel = float((self.initial_state.mass - x[6]) / scales.fuel_kg)
         terminal_error = np.asarray(
             (
-                (x[0] - self.target_x_m) / x_limit,
-                x[2] / vx_limit,
-                (x[3] - self.target_touchdown_vz_m_s) / vz_limit,
-                x[4] / theta_limit,
-                x[5] / omega_limit,
+                (x[0] - self.target_x_m) / scales.x_m,
+                x[2] / scales.vx_m_s,
+                (x[3] - self.target_touchdown_vz_m_s) / scales.vz_m_s,
+                x[4] / scales.theta_rad,
+                x[5] / scales.omega_rad_s,
             ),
             dtype=np.float64,
         )
         touchdown = float(np.mean(terminal_error**2))
         if self.intervals > 1:
-            changes = np.diff(u, axis=0)
-            changes[:, 0] /= p.throttle_max - p.throttle_min
-            changes[:, 1] /= 2.0 * p.gimbal_limit_rad
-            smoothness = float(np.mean(np.sum(changes**2, axis=1)))
+            rates = np.diff(u, axis=0) / step_s
+            rates[:, 0] /= scales.throttle_rate_per_s
+            rates[:, 1] /= scales.gimbal_rate_rad_s
+            smoothness = float(np.mean(np.sum(rates**2, axis=1)))
         else:
             smoothness = 0.0
         return ObjectiveTerms(

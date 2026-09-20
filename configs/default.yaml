@@ -223,3 +223,27 @@ optimal_control:
     fuel: 1.0
     touchdown: 0.1
     smoothness: 0.01
+  study:
+    mesh_intervals: [25, 50, 100, 200]
+    replay_dt_s: 0.005
+    final_state_tolerances:
+      x_m: 0.001
+      z_m: 0.001
+      vx_m_s: 0.001
+      vz_m_s: 0.001
+      theta_deg: 0.01
+      omega_deg_s: 0.01
+      mass_kg: 0.001
+    objective_profiles:
+      fuel_priority:
+        fuel: 1.0
+        touchdown: 0.1
+        smoothness: 0.001
+      baseline:
+        fuel: 1.0
+        touchdown: 0.1
+        smoothness: 0.01
+      smooth_control:
+        fuel: 1.0
+        touchdown: 0.1
+        smoothness: 0.1
