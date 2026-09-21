@@ -124,6 +124,26 @@ def test_config_rejects_invalid_optimal_control_study(path, value, message) -> N
         plg.validate_config(config)
 
 
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("episodes", 0, "episodes"),
+        ("minimum_cases", 101, "minimum_cases"),
+        ("runner", "parallel", "runner"),
+        ("attempt_timeout_s", 0.0, "attempt_timeout_s"),
+        ("max_retries", -1, "max_retries"),
+        ("warm_start", "none", "warm_start"),
+        ("replay_dt_s", 0.02, "replay_dt_s"),
+    ],
+)
+def test_config_rejects_invalid_teacher_pipeline(key, value, message) -> None:
+    config = deepcopy(plg.load_config(ROOT / "configs/pid-baseline-v1.yaml"))
+    config["teacher_pipeline"][key] = value
+
+    with pytest.raises(plg.ConfigError, match=message):
+        plg.validate_config(config)
+
+
 def test_config_rejects_initial_mass_below_dry_mass() -> None:
     config = deepcopy(plg.load_config(DEFAULT_CONFIG))
     config["initial_state"]["mass_kg"] = config["vehicle"]["dry_mass_kg"] - 1.0

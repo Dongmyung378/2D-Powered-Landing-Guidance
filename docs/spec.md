@@ -554,10 +554,35 @@ The baseline weights are then solved at `N=25, 50, 100, 200`. Each optimized con
 | 100 | 1.476 s | 0.000870 | pass |
 | 200 | 2.618 s | 0.00101 | pass |
 
-All configured cases passed the Day 19 completion gate. The error is not required to decrease strictly at every refinement because solver tolerances, adaptive replay integration, and interpolation also contribute; both 100- and 200-interval disagreements are roughly one-thousandth of the allowed error. Solve times are measurements from one development run and are not performance guarantees. The study demonstrates nominal transcription agreement for one initial condition. It does not impose hard throttle/gimbal rate constraints or establish robustness across initial conditions; Day 20 addresses the latter with a multi-initial-condition pipeline.
+All configured cases passed the Day 19 completion gate. The error is not required to decrease strictly at every refinement because solver tolerances, adaptive replay integration, and interpolation also contribute; both 100- and 200-interval disagreements are roughly one-thousandth of the allowed error. Solve times are measurements from one development run and are not performance guarantees. The study demonstrates nominal transcription agreement for one initial condition. It does not impose hard throttle/gimbal rate constraints; Day 20 extends the solver to a reproducible initial-condition batch.
 
 ~~~bash
 python scripts/analyze_optimal_control.py --output-dir artifacts/day19-study
 ~~~
 
 The command writes a JSON report containing all settings, objective components, solver iterations, physical final/node errors, and the completion gate. It also writes a four-panel PNG for the trade-off, normalized peak rates, mesh timing, and normalized replay error. Existing output files are never overwritten.
+
+## 26. Day 20 multi-initial-condition teacher pipeline
+
+Day 20 converts the single-case full-planar solver into a deterministic batch pipeline. `integrated_uniform_v1` samples the same seven-state medium-difficulty ranges used by the integrated-controller evaluation: 3-15 m absolute horizontal offset with both signs, 80-120 m altitude, -2 to 2 m/s horizontal velocity, -25 to -15 m/s vertical velocity, -5 to 5 deg attitude, -2 to 2 deg/s angular rate, and 950-1000 kg mass. The default batch contains 100 cases from seed `20260920`; its canonical matrix hash is `7a58dc505c4535e8f081544cea22de17743bff0d80f34debc9454b2029a9f9b9`.
+
+The runner is deliberately sequential because warm-start provenance must be deterministic. Optimization executes inside a reusable spawned process instead of the parent process. The parent waits at most 30 seconds for each attempt and terminates the worker on timeout, so the policy is enforced rather than merely measured after a blocking solve. An idle worker is also recycled after 25 attempts to limit long-run solver memory. The worker returns only NumPy-backed trajectory data and structured diagnostics; its solver console output is suppressed.
+
+The first case uses the integrated PID trajectory as its initial guess. After a case succeeds, the pipeline copies its throttle/gimbal sequence and duration, then reintegrates those controls from the next case's initial state to obtain dynamically consistent warm-start nodes. If that attempt fails solver or replay validation, or times out, the case is retried once with a new PID guess. A successful case is accepted only after the Stage A and B checks in the solver and a `0.01 s` independent replay. Replay acceptance uses the Day 19 per-state agreement tolerances and also checks terminal constraints, altitude, propellant reserve, body tilt, angular rate, and gimbal bounds.
+
+Every attempt has an explicit status. Solver failures retain the failed stage, IPOPT return status, named worst constraint, complete hard/terminal residuals, and RK4 defects when available. Timeout records contain the configured limit and elapsed time. Worker crashes, protocol mismatches, unexpected exception types, and replay-validation failures are represented separately. The top-level `failures` list contains each failed case with all attempts, even when a run has zero failures.
+
+~~~bash
+python scripts/generate_teacher_pipeline.py --output-dir artifacts/day20-teacher-pipeline
+~~~
+
+The command refuses to overwrite either output and writes only two final files:
+
+| File | Contents |
+|---|---|
+| `teacher-pipeline.json` | Settings, batch hash, completion gate, per-case attempts, compact solver metrics, replay checks, summary, and failure metadata |
+| `teacher-trajectories.npz` | Case indices, initial states, `101 x 7` state nodes, `100 x 2` controls, 101 time nodes, and durations for accepted cases |
+
+The default run executed all 100 requested cases in `126.246 s`. All 100 cases converged and passed replay on the first attempt. Case 0 used the PID guess and cases 1-99 used the previous successful trajectory, so retries, timeouts, and failures were all zero. Mean Stage A and B iteration counts were `37.54` and `29.09`. Mean propellant use was `27.349 kg`, with a `24.669-30.571 kg` range; optimized durations ranged from `5.000` to `5.762 s`. The largest final replay error was `0.00331` of its configured tolerance. The compressed dataset contains arrays with shapes `(100,101,7)` for state nodes and `(100,100,2)` for controls.
+
+The roadmap completion gate asks only whether at least 100 initial conditions were processed, so solver success and the execution gate are reported separately. This run happened to produce 100 accepted nominal trajectories, but it does not establish robustness under wind, sensing error, engine lag, model mismatch, or initial conditions outside the configured ranges. Day 21 evaluates teacher quality against the PID baseline and selects representative trajectories.

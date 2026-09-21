@@ -8,14 +8,14 @@ A reproducible 2D reusable-rocket powered-landing project that progresses from r
 
 | Item | Current status |
 |---|---|
-| Roadmap | Week 3 objective and numerical-stability tuning (Day 19) |
+| Roadmap | Week 3 multi-initial-condition teacher pipeline (Day 20) |
 | Model | Planar 3-DoF with variable mass |
 | State | x, z, vx, vz, theta, omega, mass |
 | Action | throttle, gimbal angle |
 | Current controllers | Suicide-burn, vertical PID, horizontal-attitude, and integrated landing |
 | Runtime | Python 3.12.7 |
 
-The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, a frozen integrated PID baseline, reproducible tuning, isolated-disturbance evaluation, and solved vertical, ideal-vector translation, and full planar 3-DoF optimal-control problems. The full planar objective now has explicit physical scales, a measured fuel/smoothness trade-off, a four-mesh numerical study, and fine-step simulator replay checks. Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
+The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, a frozen integrated PID baseline, reproducible tuning, isolated-disturbance evaluation, and solved vertical, ideal-vector translation, and full planar 3-DoF optimal-control problems. The full planar objective has explicit physical scales, a measured fuel/smoothness trade-off, a four-mesh numerical study, and fine-step simulator replay checks. A timeout-safe Day 20 pipeline now generates compact teacher trajectories across reproducible initial-condition batches. Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
 
 ## Optimal-control teacher formulation
 
@@ -62,6 +62,18 @@ python scripts/analyze_optimal_control.py --output-dir artifacts/day19-study
 | 0.1, smooth control | 28.003 kg | 0.478/s | 11.685 deg/s |
 
 All four mesh replays passed the per-state final-difference tolerances of `0.001 m`, `0.001 m/s`, `0.01 deg`, `0.01 deg/s`, and `0.001 kg`. The largest final error-to-tolerance ratio fell from `0.231` at 25 intervals to `8.70e-4` at 100 intervals; the measured solve time increased from `0.613 s` to `2.618 s` between 25 and 200 intervals on the development machine. These timings are comparative measurements, not runtime guarantees. Smoothness remains a soft objective, so the reference rates are not hard actuator constraints. See the [Day 19 specification](docs/spec.md#25-day-19-objective-and-numerical-stability-study) or [Korean version](docs/spec.ko.md#19일차-목적함수와-수치-안정성-연구).
+
+## Day 20 multi-initial-condition teacher pipeline
+
+Day 20 samples a deterministic batch with `integrated_uniform_v1`, runs every optimal-control solve in a reusable subprocess, and enforces a 30-second timeout per attempt. The first case uses the frozen PID controller for its initial guess. Later cases first reintegrate the previous successful control sequence from the new initial state; a failed warm start or timeout is retried once with a fresh PID guess. The worker is recycled after 25 attempts to bound long-run solver memory. Every failed attempt preserves its stage, IPOPT status, named constraint diagnostics, exception type, or timeout metadata.
+
+~~~bash
+python scripts/generate_teacher_pipeline.py --output-dir artifacts/day20-teacher-pipeline
+~~~
+
+The configured seed `20260920` produced batch SHA-256 `7a58dc505c4535e8f081544cea22de17743bff0d80f34debc9454b2029a9f9b9`. All 100 cases converged and passed independent simulator replay on their first attempt: one PID seed and 99 previous-success warm starts. There were no retries, timeouts, or failures. Mean propellant use was `27.349 kg` with a `24.669-30.571 kg` range, and total measured wall time was `126.246 s`. This passes the Day 20 execution gate; it is a finite nominal sample, not a disturbance-robustness guarantee.
+
+The command writes one JSON manifest and one compressed NPZ. The manifest contains the batch hash, policies, every attempt, solver/replay metrics, and an explicit failures list. The NPZ stores only accepted fixed-mesh trajectories with case indices, initial states, time nodes, seven-state nodes, throttle/gimbal controls, and durations. Both files are under the ignored `artifacts/` directory. See the [Day 20 specification](docs/spec.md#26-day-20-multi-initial-condition-teacher-pipeline) or [Korean version](docs/spec.ko.md#20일차-다중-초기조건-teacher-pipeline).
 
 ## Frozen Week 2 PID baseline
 
@@ -358,7 +370,7 @@ The tracked repository contains only source code, reproducible configuration, te
 
 - Week 1: simulator, event handling, logging, replay, and numerical verification - complete
 - Week 2: suicide-burn and frozen PID baseline - complete
-- Week 3: constrained optimal-control teacher - full planar solver and Day 19 tuning complete; multi-initial-condition pipeline next
+- Week 3: constrained optimal-control teacher - full planar solver, numerical tuning, and 100-case pipeline complete; quality analysis next
 - Week 4: dataset generation and Behavior Cloning
 - Week 5: DAgger closed-loop improvement
 - Week 6: disturbances and Monte Carlo evaluation

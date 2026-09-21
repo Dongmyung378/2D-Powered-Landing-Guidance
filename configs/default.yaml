@@ -247,3 +247,16 @@ optimal_control:
         fuel: 1.0
         touchdown: 0.1
         smoothness: 0.1
+
+teacher_pipeline:
+  sampler: integrated_uniform_v1
+  episodes: 100
+  seed: 20260920
+  minimum_cases: 100
+  runner: sequential_subprocess
+  attempt_timeout_s: 30.0
+  max_retries: 1
+  warm_start: previous_success
+  retry_initial_guess: pid
+  worker_restart_after_attempts: 25
+  replay_dt_s: 0.01

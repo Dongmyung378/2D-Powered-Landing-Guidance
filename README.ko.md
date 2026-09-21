@@ -8,14 +8,14 @@
 
 | 항목 | 현재 상태 |
 |---|---|
-| 로드맵 | 3주차 목적함수·수치 안정성 튜닝(19일차) |
+| 로드맵 | 3주차 다중 초기조건 Teacher pipeline(20일차) |
 | 모델 | 가변 질량 평면 3자유도 |
 | 상태 | x, z, vx, vz, theta, omega, mass |
 | 제어 | throttle, gimbal angle |
 | 현재 제어기 | Suicide-burn, 수직 PID, 수평·자세 제어, 통합 착륙 제어 |
 | 실행 환경 | Python 3.12.7 |
 
-현재 저장소에는 검증된 시뮬레이션 환경, 두 가지 비학습 수직 착륙 기준선, 수평 위치·자세 직렬 제어기, 동결된 통합 PID 기준선, 재현 가능한 튜닝, 분리 외란 평가, 수직·이상 추력 방향 병진·전체 평면 3자유도 최적제어 문제가 구현되어 있습니다. 전체 평면 목적함수의 물리 척도 정규화, 연료·제어 평활성 trade-off, 네 가지 mesh 비교와 세밀한 simulator 재적분 검증도 포함합니다. Behavior Cloning, DAgger, 복합 불확실성과 더 넓은 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
+현재 저장소에는 검증된 시뮬레이션 환경, 두 가지 비학습 수직 착륙 기준선, 수평 위치·자세 직렬 제어기, 동결된 통합 PID 기준선, 재현 가능한 튜닝, 분리 외란 평가, 수직·이상 추력 방향 병진·전체 평면 3자유도 최적제어 문제가 구현되어 있습니다. 전체 평면 목적함수의 물리 척도 정규화, 연료·제어 평활성 trade-off, 네 가지 mesh 비교와 세밀한 simulator 재적분 검증도 포함합니다. 20일차에는 재현 가능한 초기조건 batch에서 timeout을 강제하며 압축 Teacher 궤적을 생성하는 pipeline을 추가했습니다. Behavior Cloning, DAgger, 복합 불확실성과 더 넓은 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
 
 ## 최적제어 Teacher 문제 정식화
 
@@ -62,6 +62,18 @@ python scripts/analyze_optimal_control.py --output-dir artifacts/day19-study
 | 0.1, 평활 제어 | 28.003 kg | 0.478/s | 11.685 deg/s |
 
 네 mesh의 재적분 결과가 모두 상태별 최종 차이 허용오차 `0.001 m`, `0.001 m/s`, `0.01 deg`, `0.01 deg/s`, `0.001 kg` 안에 들어왔습니다. 최대 최종 오차/허용오차 비율은 25구간의 `0.231`에서 100구간의 `8.70e-4`로 감소했고, 개발 환경 측정 풀이 시간은 25구간 `0.613 s`에서 200구간 `2.618 s`로 늘었습니다. 이 시간은 상대 비교용 측정값이며 실행시간 보장이 아닙니다. 평활성은 soft objective이므로 기준 변화율은 아직 hard 구동기 제약이 아닙니다. [19일차 한글 명세](docs/spec.ko.md#19일차-목적함수와-수치-안정성-연구)와 [영문 명세](docs/spec.md#25-day-19-objective-and-numerical-stability-study)에서 자세히 볼 수 있습니다.
+
+## 20일차 다중 초기조건 Teacher pipeline
+
+20일차 pipeline은 `integrated_uniform_v1`으로 결정적인 batch를 만들고, 재사용 가능한 별도 process에서 각 최적제어 문제를 풉니다. 시도마다 30초 timeout을 실제로 강제합니다. 첫 case는 동결 PID 제어기의 초기 추정치를 사용합니다. 이후 case는 직전 성공 제어열을 새 초기상태에서 다시 적분해 먼저 warm-start하고, 실패하거나 timeout이 발생하면 새로운 PID 추정치로 한 번 재시도합니다. 장시간 solver 메모리 누적을 제한하기 위해 25회마다 worker를 교체합니다. 실패 시 단계, IPOPT 상태, 이름이 붙은 제약 진단, 예외 종류 또는 timeout metadata를 모두 남깁니다.
+
+~~~bash
+python scripts/generate_teacher_pipeline.py --output-dir artifacts/day20-teacher-pipeline
+~~~
+
+Seed `20260920`의 batch SHA-256은 `7a58dc505c4535e8f081544cea22de17743bff0d80f34debc9454b2029a9f9b9`입니다. 100개 case가 모두 첫 시도에 수렴하고 독립 simulator 재적분을 통과했습니다. 첫 case는 PID, 나머지 99개는 직전 성공 warm-start를 사용했으며 재시도, timeout과 실패는 모두 0건입니다. 평균 연료 사용량은 `27.349 kg`, 범위는 `24.669-30.571 kg`, 전체 측정시간은 `126.246 s`였습니다. 20일차 실행 완료 기준은 통과했지만, 이는 유한한 무풍 명목 표본이며 외란 강건성 보장은 아닙니다.
+
+명령은 JSON manifest 하나와 압축 NPZ 하나를 저장합니다. Manifest에는 batch hash, 정책, 모든 시도, solver·재적분 지표와 명시적인 실패 목록이 들어갑니다. NPZ에는 채택된 고정 mesh 궤적의 case index, 초기상태, 시간 node, 7상태 node, throttle·gimbal 제어와 종료시간만 저장합니다. 두 파일은 Git에서 제외되는 `artifacts/` 아래에 남습니다. [20일차 한글 명세](docs/spec.ko.md#20일차-다중-초기조건-teacher-pipeline)와 [영문 명세](docs/spec.md#26-day-20-multi-initial-condition-teacher-pipeline)에서 자세히 볼 수 있습니다.
 
 ## 동결된 2주차 PID 기준선
 
@@ -358,7 +370,7 @@ Git에 포함되는 저장소에는 소스 코드, 재현 가능한 설정, 기�
 
 - 1주차: 시뮬레이터, 사건 처리, 기록, 재생과 수치 검증 - 완료
 - 2주차: suicide-burn과 동결 PID 기준선 - 완료
-- 3주차: 제약 최적제어 Teacher - 전체 평면 솔버와 19일차 튜닝 완료, 다음은 다중 초기조건 파이프라인
+- 3주차: 제약 최적제어 Teacher - 전체 평면 solver, 수치 튜닝과 100-case pipeline 완료, 다음은 품질 분석
 - 4주차: 데이터셋 생성과 Behavior Cloning
 - 5주차: DAgger 폐루프 개선
 - 6주차: 외란과 Monte Carlo 평가

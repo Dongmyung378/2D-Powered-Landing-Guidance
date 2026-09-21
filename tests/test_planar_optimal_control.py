@@ -19,6 +19,7 @@ from powered_landing_guidance.optimal_control import LandingOptimalControlProble
 from powered_landing_guidance.planar_optimal_control import (  # noqa: E402
     PlanarSolveError,
     _rhs_symbolic,
+    control_sequence_initial_guess,
     pid_initial_guess,
     solve_planar_landing,
 )
@@ -79,6 +80,48 @@ def test_pid_guess_contains_full_dynamics_and_bounded_controls() -> None:
     np.testing.assert_array_equal(guess.states[0], INITIAL)
     defects = model.rk4_defects(guess.states, guess.controls, guess.duration_s)
     np.testing.assert_allclose(defects, 0.0, atol=1e-12)
+
+
+def test_control_sequence_warm_start_reintegrates_from_new_initial_state() -> None:
+    original = problem()
+    pid_guess = pid_initial_guess(original, CONFIG)
+    shifted_initial = (
+        -8.0,
+        105.0,
+        1.0,
+        -19.0,
+        np.deg2rad(-2.0),
+        np.deg2rad(1.0),
+        980.0,
+    )
+    shifted = problem(initial=shifted_initial)
+
+    warm = control_sequence_initial_guess(
+        shifted,
+        pid_guess.controls,
+        pid_guess.duration_s,
+        source="previous_success",
+        source_outcome="case_0000",
+    )
+
+    assert warm.source == "previous_success"
+    assert warm.source_outcome == "case_0000"
+    np.testing.assert_allclose(warm.states[0], shifted_initial)
+    np.testing.assert_allclose(
+        shifted.rk4_defects(warm.states, warm.controls, warm.duration_s),
+        0.0,
+        atol=1e-12,
+    )
+
+    invalid = pid_guess.controls.copy()
+    invalid[0, 0] = 1.1
+    with pytest.raises(ValueError, match="throttle"):
+        control_sequence_initial_guess(
+            shifted,
+            invalid,
+            pid_guess.duration_s,
+            source="previous_success",
+        )
 
 
 def test_full_planar_solver_lands_with_attitude_and_rate_limits() -> None:

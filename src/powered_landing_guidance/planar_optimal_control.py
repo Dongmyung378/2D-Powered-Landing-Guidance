@@ -172,6 +172,38 @@ def pid_initial_guess(
     return _guess_from_controls(problem, sampled, duration_s, "pid", outcome)
 
 
+def control_sequence_initial_guess(
+    problem: LandingOptimalControlProblem,
+    controls: NDArray[np.float64],
+    duration_s: float,
+    *,
+    source: str,
+    source_outcome: str | None = None,
+) -> PlanarGuess:
+    """Reintegrate a bounded control sequence from this problem's initial state."""
+    values = np.asarray(controls, dtype=np.float64)
+    if values.shape != (problem.intervals, 2) or not np.all(np.isfinite(values)):
+        raise ValueError(f"controls must have shape ({problem.intervals}, 2) and be finite")
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError("source must be a nonempty string")
+    p = problem.parameters
+    tolerance = 1e-12
+    if np.any(values[:, 0] < p.throttle_min - tolerance) or np.any(
+        values[:, 0] > p.throttle_max + tolerance
+    ):
+        raise ValueError("warm-start throttle exceeds actuator bounds")
+    if np.any(np.abs(values[:, 1]) > p.gimbal_limit_rad + tolerance):
+        raise ValueError("warm-start gimbal exceeds actuator bounds")
+    duration = problem.mesh_step_s(duration_s) * problem.intervals
+    return _guess_from_controls(
+        problem,
+        values.copy(),
+        duration,
+        source.strip(),
+        source_outcome,
+    )
+
+
 def _add_terminal_constraints(opti, final, problem: LandingOptimalControlProblem) -> None:
     x_limit, vx_limit, vz_limit, theta_limit, omega_limit = (
         float(value) for value in problem.terminal_limits
@@ -488,6 +520,7 @@ def solve_planar_landing(
     config: dict[str, Any],
     *,
     integration_step_s: float = 0.02,
+    initial_guess: PlanarGuess | None = None,
 ) -> PlanarLandingResult:
     """Solve the full seven-state planar landing problem and replay its controls."""
     if not np.isfinite(integration_step_s) or integration_step_s <= 0:
@@ -497,7 +530,16 @@ def solve_planar_landing(
     if abs(problem.initial_state.omega) > problem.max_abs_angular_rate_rad_s:
         raise ValueError("initial angular rate exceeds the optimal-control limit")
 
-    guess = pid_initial_guess(problem, config)
+    if initial_guess is None:
+        guess = pid_initial_guess(problem, config)
+    else:
+        guess = control_sequence_initial_guess(
+            problem,
+            initial_guess.controls,
+            initial_guess.duration_s,
+            source=initial_guess.source,
+            source_outcome=initial_guess.source_outcome,
+        )
     stage_a, candidate = _solve_stage(problem, "A", guess)
     if (
         stage_a.max_hard_violation > problem.feasibility_tolerance

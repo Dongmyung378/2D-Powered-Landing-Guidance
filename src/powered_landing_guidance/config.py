@@ -559,6 +559,42 @@ def validate_config(config: Config) -> None:
         ):
             raise ConfigError("optimal_control study smoothness weights must increase")
 
+        pipeline = _mapping(config, "teacher_pipeline")
+        expected_pipeline_keys = {
+            "sampler",
+            "episodes",
+            "seed",
+            "minimum_cases",
+            "runner",
+            "attempt_timeout_s",
+            "max_retries",
+            "warm_start",
+            "retry_initial_guess",
+            "worker_restart_after_attempts",
+            "replay_dt_s",
+        }
+        if set(pipeline) != expected_pipeline_keys:
+            raise ConfigError("teacher_pipeline keys are invalid")
+        if pipeline.get("sampler") != "integrated_uniform_v1":
+            raise ConfigError("teacher_pipeline sampler must be 'integrated_uniform_v1'")
+        episodes = _positive_integer(pipeline, "episodes")
+        _nonnegative_integer(pipeline, "seed")
+        minimum_cases = _positive_integer(pipeline, "minimum_cases")
+        if minimum_cases > episodes:
+            raise ConfigError("teacher_pipeline minimum_cases cannot exceed episodes")
+        if pipeline.get("runner") != "sequential_subprocess":
+            raise ConfigError("teacher_pipeline runner must be 'sequential_subprocess'")
+        _positive(pipeline, "attempt_timeout_s")
+        _nonnegative_integer(pipeline, "max_retries")
+        if pipeline.get("warm_start") != "previous_success":
+            raise ConfigError("teacher_pipeline warm_start must be 'previous_success'")
+        if pipeline.get("retry_initial_guess") != "pid":
+            raise ConfigError("teacher_pipeline retry_initial_guess must be 'pid'")
+        _positive_integer(pipeline, "worker_restart_after_attempts")
+        pipeline_replay_dt = _positive(pipeline, "replay_dt_s")
+        if pipeline_replay_dt >= dt:
+            raise ConfigError("teacher_pipeline replay_dt_s must be below simulation.dt_s")
+
     baseline_protocol = config.get("baseline_protocol")
     if baseline_protocol is not None:
         if not isinstance(baseline_protocol, dict):
