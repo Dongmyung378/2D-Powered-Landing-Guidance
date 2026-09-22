@@ -589,3 +589,25 @@ python scripts/generate_teacher_pipeline.py --output-dir artifacts/day20-teacher
 기본 실행은 100개 case를 `126.246 s`에 처리했습니다. 100개 모두 첫 시도에 수렴하고 재적분을 통과했습니다. 0번 case는 PID, 1-99번 case는 직전 성공 궤적을 사용했으므로 재시도, timeout과 실패는 모두 0건입니다. A·B단계 평균 반복 수는 `37.54`, `29.09`였습니다. 평균 연료 사용량은 `27.349 kg`, 범위는 `24.669-30.571 kg`, 최적 종료시간 범위는 `5.000-5.762 s`였습니다. 최대 최종 재적분 오차는 설정 허용오차의 `0.00331`배였습니다. 압축 dataset의 상태 node 배열은 `(100,101,7)`, 제어 배열은 `(100,100,2)`입니다.
 
 로드맵 완료 기준은 최소 100개 초기조건 처리 여부이므로 solver 성공과 실행 완료 기준을 별도로 보고합니다. 이번 실행에서는 100개 명목 궤적이 모두 채택됐지만, 바람, 센서 오차, 엔진 지연, 모델 불일치 또는 설정 범위 밖 초기조건의 강건성을 증명하지는 않습니다. 21일차에는 PID 기준선과 Teacher 품질을 비교하고 대표 궤적을 선정합니다.
+
+## 21일차 Teacher 검증과 동결
+
+21일차에는 `planar-teacher-v1`을 변경 불가능한 3주차 비교 protocol로 정의합니다. Canonical 설정 digest는 좌표 규약, 시뮬레이션·기체 parameter, 명목 환경, 착륙 제한, 초기 추정치에 사용하는 통합 PID 설정, 최적제어 정식화와 Teacher pipeline 정책을 모두 포함합니다. `pid-baseline-v1.yaml`의 digest는 `dfea2326159997cc0fccc8977e13e316856c6eb2ec5e26f97cbb07196f648793`입니다. 명목 시험 집합은 seed `20260920`의 100-case 행렬이며 SHA-256은 `7a58dc505c4535e8f081544cea22de17743bff0d80f34debc9454b2029a9f9b9`입니다. 원본 보고서와 궤적 archive도 각각 `11ef6d9f823686483dcf1d4106415097cb57db43a6899973d757fe1aa7dfe414`, `c19f897d63c51e6a8b5f79f5dbe8594e7bbd2578221ea4873f4652149905a9dd`로 동결합니다. 어느 digest든 바뀌거나 시험 sampler, case 수 또는 seed가 생성 pipeline과 다르면 검증을 중단합니다.
+
+수치 평가 전 20일차 bundle loader는 보고서 problem·schema version, 정확한 batch 식별값, 순서와 누락이 없는 case 기록, 실패 case와 최상위 실패 목록의 일대일 대응, 요약 개수, NPZ field 집합, 배열 크기·dtype, 성공 case index, 초기상태, 엄격히 증가하는 시간 node, 종료시간, 구동기 경계와 JSON 배열 metadata를 확인합니다. NPZ는 pickled object를 허용하지 않고 엽니다. 따라서 오래됐거나 순서가 바뀌고 일부가 누락됐거나 수동으로 수정된 dataset을 PID와 조용히 비교할 수 없습니다.
+
+채택된 모든 제어열은 `0.01 s` 간격으로 `simulate_planar`에서 다시 적분합니다. 이는 20일차 보고서에 저장된 Boolean 재적분 결과를 재사용하는 것이 아니라 저장된 초기상태, 제어와 종료시간으로 새로 수행한 21일차 계산입니다. 검증기는 최종·node 불일치, 정규화 종단 잔차, node 사이 고도, 추진제 여유, 몸체 기울기, 각속도, throttle과 gimbal 검사를 다시 계산합니다. 이름이 붙은 검사별 실패 수와 전체 batch의 최소 물리 margin도 보고합니다.
+
+Teacher 100개 해가 모두 새 재적분을 통과했습니다. 상태별 허용오차 대비 최대 최종·node 오차는 `0.00331085`, 최대 정규화 종단 위반은 `2.63555e-6`으로 가능해 한계 `0.001`보다 작았습니다. Solver에 저장된 최대 B단계 hard constraint 잔차는 `8.89050e-9`였고, 이름이 붙은 모든 재적분 검사의 실패 수는 0입니다. 원시 재적분의 최소 기울기 margin은 `-0.00938 deg`였지만 판정에 명시된 자세 허용오차 `0.01 deg` 안이므로 통과했습니다. 최소 각속도 margin은 `1.84e-6 deg/s`, 최소 gimbal margin은 `2.50e-6 deg`, 최소 throttle 상한 margin은 `4.62e-8`이었습니다. 여러 해가 경계에 매우 가깝기 때문에 이 수치를 구동기나 모델 강건성 margin으로 해석하면 안 됩니다.
+
+통합 PID는 같은 초기조건 100개와 무풍 조건에서 평가했습니다. 99개는 착륙했고 1개는 crash였습니다. 실패 case는 위치 제한을 `1.582 m`, 수평속도 제한을 `0.277 m/s`, 각속도 제한을 `1.851 deg/s` 넘었습니다. 나머지 case에는 종단 제한 위반이 없었습니다. Teacher의 전체 채택 case 평균 연료는 `27.349 kg`입니다. PID도 착륙한 99개의 짝지은 case에서 Teacher 평균은 `27.347 kg`, PID 평균은 `51.907 kg`으로, Teacher가 평균 `24.560 kg` 덜 사용했습니다.
+
+Teacher pipeline 전체 측정시간은 `126.246 s`, 채택 시도 합계는 `123.566 s`, 채택 시도 평균은 `1.236 s`였습니다. PID 평가는 물리 시뮬레이션을 포함해 `20.661 s`가 걸렸습니다. PID 명령 계산 자체는 합계 `5.609 s`, controller update당 약 `0.483 ms`였습니다. Offline 비선형계획 풀이 시간과 online 제어 명령 시간은 서로 다른 측정값이므로 보고서는 이를 분리하며 두 값의 비율을 실시간 속도 향상으로 주장하지 않습니다.
+
+대표 선정 규칙은 채택 집합의 연료 중앙값에 가장 가까운 성공 case이며, 차이가 같으면 case index가 작은 쪽을 선택합니다. 이에 따라 22번 case가 선정됐습니다. 연료 중앙값은 `27.3636 kg`, 선택 case는 `27.3641 kg`입니다. 제어열을 새로 재적분해 표준 episode log schema로 만들고 240-frame GIF로 렌더링했습니다. 마지막 재생 frame은 `5.000 s` 후 `x=-0.0091 m`, `vx=0.0194 m/s`, `vz=-0.9645 m/s`, `theta=-0.0878 deg`, `omega=0.0243 deg/s`에 도달했고 연료 `27.3641 kg`을 사용했습니다.
+
+~~~bash
+python scripts/validate_teacher.py
+~~~
+
+명령은 결과를 덮어쓰지 않으며 정확히 세 파일을 생성합니다. `teacher-validation.json`에는 protocol 검증, Teacher·PID 지표, 제약 분석, PID case별 결과, 독립 재적분 결과, 실패 집계, 비교와 통과 판정이 들어갑니다. `representative-teacher.json`은 선택된 표준 재생 episode이고 `representative-teacher.gif`는 해당 애니메이션입니다. 3주차 통과 기준은 solver 성공률 90% 이상, 모든 채택 해의 기존·신규 재적분 통과, 모든 최적화 실패의 별도 집계입니다. Protocol과 완료 기준 검사 6개가 모두 통과했습니다. 이 결과는 동결된 무풍 명목 표본에 한정되며 외란 강건성, 구동기 대역폭, 모델 불일치, hard 제어 변화율 제한과 하드웨어 안전은 아직 검증하지 않았습니다.

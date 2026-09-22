@@ -12,6 +12,17 @@ from numpy.typing import NDArray
 INITIAL_CONDITION_SAMPLER = "integrated_uniform_v1"
 _DIGEST_PREFIX = b"powered-landing-guidance:integrated-initial-conditions:v1\n"
 _CONTROLLER_DIGEST_PREFIX = b"powered-landing-guidance:integrated-controller:v1\n"
+_TEACHER_DIGEST_PREFIX = b"powered-landing-guidance:planar-teacher:v1\n"
+_TEACHER_CONFIG_KEYS = (
+    "conventions",
+    "simulation",
+    "vehicle",
+    "environment",
+    "landing_success",
+    "integrated_landing_controller",
+    "optimal_control",
+    "teacher_pipeline",
+)
 
 
 def sample_integrated_initial_states(
@@ -75,6 +86,22 @@ def integrated_controller_sha256(config: dict[str, Any]) -> str:
     return hashlib.sha256(_CONTROLLER_DIGEST_PREFIX + encoded).hexdigest()
 
 
+def teacher_configuration_sha256(config: dict[str, Any]) -> str:
+    """Hash every setting that defines generation and replay of the planar teacher."""
+    try:
+        payload = {key: config[key] for key in _TEACHER_CONFIG_KEYS}
+    except KeyError as error:
+        raise ValueError(f"teacher configuration is missing {error.args[0]}") from error
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("ascii")
+    return hashlib.sha256(_TEACHER_DIGEST_PREFIX + encoded).hexdigest()
+
+
 def frozen_baseline_initial_states(config: dict[str, Any]) -> NDArray[np.float64]:
     """Recreate a frozen benchmark set and reject any protocol drift."""
     protocol = config.get("baseline_protocol")
@@ -99,5 +126,37 @@ def frozen_baseline_initial_states(config: dict[str, Any]) -> NDArray[np.float64
     )
     if initial_condition_sha256(states) != conditions.get("sha256"):
         raise ValueError("frozen initial-condition set does not match its SHA-256")
+    states.flags.writeable = False
+    return states
+
+
+def frozen_teacher_initial_states(config: dict[str, Any]) -> NDArray[np.float64]:
+    """Recreate the frozen Day 21 nominal set and reject any teacher-setting drift."""
+    protocol = config.get("teacher_protocol")
+    if not isinstance(protocol, dict) or protocol.get("frozen") is not True:
+        raise ValueError("configuration does not contain a frozen teacher protocol")
+
+    expected_configuration_hash = protocol.get("configuration_sha256")
+    configuration_hash = teacher_configuration_sha256(config)
+    if configuration_hash != expected_configuration_hash:
+        raise ValueError("frozen teacher settings have changed")
+
+    conditions = protocol.get("nominal_test_set")
+    if not isinstance(conditions, dict):
+        raise ValueError("teacher protocol is missing nominal_test_set")
+    pipeline = config["teacher_pipeline"]
+    for key in ("sampler", "episodes", "seed"):
+        if conditions.get(key) != pipeline.get(key):
+            raise ValueError(f"teacher nominal test set does not match teacher_pipeline.{key}")
+    if conditions.get("sampler") != INITIAL_CONDITION_SAMPLER:
+        raise ValueError(f"unsupported initial-condition sampler: {conditions.get('sampler')}")
+
+    states = sample_integrated_initial_states(
+        config,
+        episodes=conditions["episodes"],
+        seed=conditions["seed"],
+    )
+    if initial_condition_sha256(states) != conditions.get("sha256"):
+        raise ValueError("frozen teacher initial-condition set does not match its SHA-256")
     states.flags.writeable = False
     return states

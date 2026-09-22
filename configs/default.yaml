@@ -260,3 +260,22 @@ teacher_pipeline:
   retry_initial_guess: pid
   worker_restart_after_attempts: 25
   replay_dt_s: 0.01
+
+teacher_protocol:
+  id: planar-teacher-v1
+  teacher: full-planar-3dof-direct-multiple-shooting
+  frozen: true
+  configuration_sha256: 9e1455405f163da567d866421c4c9f1b11d14828dbea7b1b7609fce46fa0b542
+  nominal_test_set:
+    sampler: integrated_uniform_v1
+    episodes: 100
+    seed: 20260920
+    sha256: 7a58dc505c4535e8f081544cea22de17743bff0d80f34debc9454b2029a9f9b9
+  source_artifacts:
+    report_sha256: 11ef6d9f823686483dcf1d4106415097cb57db43a6899973d757fe1aa7dfe414
+    dataset_sha256: c19f897d63c51e6a8b5f79f5dbe8594e7bbd2578221ea4873f4652149905a9dd
+  acceptance:
+    minimum_solver_success_rate: 0.90
+    require_all_accepted_replays: true
+  representative_case:
+    selection: median_fuel

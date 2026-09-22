@@ -595,6 +595,64 @@ def validate_config(config: Config) -> None:
         if pipeline_replay_dt >= dt:
             raise ConfigError("teacher_pipeline replay_dt_s must be below simulation.dt_s")
 
+        teacher_protocol = _mapping(config, "teacher_protocol")
+        expected_protocol_keys = {
+            "id",
+            "teacher",
+            "frozen",
+            "configuration_sha256",
+            "nominal_test_set",
+            "source_artifacts",
+            "acceptance",
+            "representative_case",
+        }
+        if set(teacher_protocol) != expected_protocol_keys:
+            raise ConfigError("teacher_protocol keys are invalid")
+        protocol_id = teacher_protocol.get("id")
+        if not isinstance(protocol_id, str) or not protocol_id.strip():
+            raise ConfigError("teacher_protocol.id must be a nonempty string")
+        if teacher_protocol.get("teacher") != "full-planar-3dof-direct-multiple-shooting":
+            raise ConfigError("teacher_protocol.teacher is invalid")
+        if teacher_protocol.get("frozen") is not True:
+            raise ConfigError("teacher_protocol.frozen must be true")
+        _sha256(teacher_protocol, "configuration_sha256")
+
+        nominal_test_set = _mapping(teacher_protocol, "nominal_test_set")
+        if set(nominal_test_set) != {"sampler", "episodes", "seed", "sha256"}:
+            raise ConfigError("teacher nominal_test_set keys are invalid")
+        if nominal_test_set.get("sampler") != "integrated_uniform_v1":
+            raise ConfigError("teacher nominal sampler must be 'integrated_uniform_v1'")
+        _positive_integer(nominal_test_set, "episodes")
+        _nonnegative_integer(nominal_test_set, "seed")
+        _sha256(nominal_test_set, "sha256")
+
+        source_artifacts = _mapping(teacher_protocol, "source_artifacts")
+        if set(source_artifacts) != {"report_sha256", "dataset_sha256"}:
+            raise ConfigError("teacher source_artifacts keys are invalid")
+        _sha256(source_artifacts, "report_sha256")
+        _sha256(source_artifacts, "dataset_sha256")
+
+        teacher_acceptance = _mapping(teacher_protocol, "acceptance")
+        if set(teacher_acceptance) != {
+            "minimum_solver_success_rate",
+            "require_all_accepted_replays",
+        }:
+            raise ConfigError("teacher acceptance keys are invalid")
+        minimum_solver_success = _positive(
+            teacher_acceptance,
+            "minimum_solver_success_rate",
+        )
+        if minimum_solver_success > 1.0:
+            raise ConfigError("teacher minimum_solver_success_rate cannot exceed 1")
+        if teacher_acceptance.get("require_all_accepted_replays") is not True:
+            raise ConfigError("teacher require_all_accepted_replays must be true")
+
+        representative_case = _mapping(teacher_protocol, "representative_case")
+        if set(representative_case) != {"selection"}:
+            raise ConfigError("teacher representative_case keys are invalid")
+        if representative_case.get("selection") != "median_fuel":
+            raise ConfigError("teacher representative selection must be 'median_fuel'")
+
     baseline_protocol = config.get("baseline_protocol")
     if baseline_protocol is not None:
         if not isinstance(baseline_protocol, dict):

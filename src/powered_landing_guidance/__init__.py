@@ -15,9 +15,11 @@ from powered_landing_guidance.controllers import (
 from powered_landing_guidance.evaluation import (
     INITIAL_CONDITION_SAMPLER,
     frozen_baseline_initial_states,
+    frozen_teacher_initial_states,
     initial_condition_sha256,
     integrated_controller_sha256,
     sample_integrated_initial_states,
+    teacher_configuration_sha256,
 )
 from powered_landing_guidance.model import (
     ACTION_NAMES,
@@ -55,10 +57,12 @@ __all__ = [
     "estimate_suicide_burn",
     "estimate_variable_mass_suicide_burn",
     "frozen_baseline_initial_states",
+    "frozen_teacher_initial_states",
     "initial_condition_sha256",
     "integrated_controller_sha256",
     "load_config",
     "sample_integrated_initial_states",
+    "teacher_configuration_sha256",
     "validate_config",
 ]
 

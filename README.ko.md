@@ -8,14 +8,14 @@
 
 | 항목 | 현재 상태 |
 |---|---|
-| 로드맵 | 3주차 다중 초기조건 Teacher pipeline(20일차) |
+| 로드맵 | 3주차 Teacher 검증·동결 완료(21일차) |
 | 모델 | 가변 질량 평면 3자유도 |
 | 상태 | x, z, vx, vz, theta, omega, mass |
 | 제어 | throttle, gimbal angle |
 | 현재 제어기 | Suicide-burn, 수직 PID, 수평·자세 제어, 통합 착륙 제어 |
 | 실행 환경 | Python 3.12.7 |
 
-현재 저장소에는 검증된 시뮬레이션 환경, 두 가지 비학습 수직 착륙 기준선, 수평 위치·자세 직렬 제어기, 동결된 통합 PID 기준선, 재현 가능한 튜닝, 분리 외란 평가, 수직·이상 추력 방향 병진·전체 평면 3자유도 최적제어 문제가 구현되어 있습니다. 전체 평면 목적함수의 물리 척도 정규화, 연료·제어 평활성 trade-off, 네 가지 mesh 비교와 세밀한 simulator 재적분 검증도 포함합니다. 20일차에는 재현 가능한 초기조건 batch에서 timeout을 강제하며 압축 Teacher 궤적을 생성하는 pipeline을 추가했습니다. Behavior Cloning, DAgger, 복합 불확실성과 더 넓은 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
+현재 저장소에는 검증된 시뮬레이션 환경, 두 가지 비학습 수직 착륙 기준선, 수평 위치·자세 직렬 제어기, 동결된 통합 PID 기준선, 재현 가능한 튜닝, 분리 외란 평가, 수직·이상 추력 방향 병진·전체 평면 3자유도 최적제어 문제가 구현되어 있습니다. 전체 평면 목적함수의 물리 척도 정규화, 연료·제어 평활성 trade-off, 네 가지 mesh 비교와 세밀한 simulator 재적분 검증도 포함합니다. 20일차에는 재현 가능한 초기조건 100개에서 압축 Teacher 궤적을 생성했고, 21일차에는 이를 독립 재적분하고 같은 조건의 PID와 비교한 뒤 대표 애니메이션과 동결 protocol을 완성했습니다. Behavior Cloning, DAgger, 복합 불확실성과 더 넓은 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
 
 ## 최적제어 Teacher 문제 정식화
 
@@ -74,6 +74,20 @@ python scripts/generate_teacher_pipeline.py --output-dir artifacts/day20-teacher
 Seed `20260920`의 batch SHA-256은 `7a58dc505c4535e8f081544cea22de17743bff0d80f34debc9454b2029a9f9b9`입니다. 100개 case가 모두 첫 시도에 수렴하고 독립 simulator 재적분을 통과했습니다. 첫 case는 PID, 나머지 99개는 직전 성공 warm-start를 사용했으며 재시도, timeout과 실패는 모두 0건입니다. 평균 연료 사용량은 `27.349 kg`, 범위는 `24.669-30.571 kg`, 전체 측정시간은 `126.246 s`였습니다. 20일차 실행 완료 기준은 통과했지만, 이는 유한한 무풍 명목 표본이며 외란 강건성 보장은 아닙니다.
 
 명령은 JSON manifest 하나와 압축 NPZ 하나를 저장합니다. Manifest에는 batch hash, 정책, 모든 시도, solver·재적분 지표와 명시적인 실패 목록이 들어갑니다. NPZ에는 채택된 고정 mesh 궤적의 case index, 초기상태, 시간 node, 7상태 node, throttle·gimbal 제어와 종료시간만 저장합니다. 두 파일은 Git에서 제외되는 `artifacts/` 아래에 남습니다. [20일차 한글 명세](docs/spec.ko.md#20일차-다중-초기조건-teacher-pipeline)와 [영문 명세](docs/spec.md#26-day-20-multi-initial-condition-teacher-pipeline)에서 자세히 볼 수 있습니다.
+
+## 21일차 Teacher 검증과 동결
+
+21일차에는 `planar-teacher-v1`을 동결했습니다. 전체 생성 설정, 100-case 명목 시험 집합과 20일차 원본 산출물 두 개에 hash를 두어 동역학, PID 초기 추정 정책, 목적함수, mesh, 재적분 허용오차, 초기조건 범위, case 수, seed, 보고서 또는 궤적 archive가 바뀌면 평가를 중단합니다. 비교 전에는 JSON/NPZ schema, 배열 크기와 metadata, 채택 case index, 초기상태, 시간 node, 구동기 경계와 실패 목록의 완전성도 검사합니다.
+
+~~~bash
+python scripts/validate_teacher.py
+~~~
+
+명령은 저장된 모든 제어열을 `0.01 s` 간격으로 다시 적분한 다음, 정확히 같은 초기조건 100개에서 통합 PID를 실행합니다. Teacher는 `100/100`을 풀었고 100개 독립 재적분 모두 종단, 고도, 추진제, 기울기, 각속도, throttle, gimbal과 node 일치 검사를 통과했습니다. PID는 `99/100` 착륙했고, 실패 1건은 최종 위치·수평속도·각속도 제한을 넘은 crash였습니다. 두 방법 모두 착륙한 99건에서 평균 연료는 Teacher `27.347 kg`, PID `51.907 kg`이었으며 Teacher가 짝지은 case 평균 `24.560 kg`을 덜 사용했습니다.
+
+Teacher 생성 전체 측정시간은 `126.246 s`, 채택 시도 평균은 `1.236 s`였습니다. PID 명목 평가는 시뮬레이션을 포함해 `20.661 s`였고, 제어 명령 계산 자체는 합계 `5.609 s`, update당 약 `0.483 ms`였습니다. 앞 수치는 offline 최적화이고 뒤 수치는 online 제어 계산이므로 보고서에서는 직접 속도비로 합치지 않고 분리했습니다.
+
+3주차 통과 기준은 solver 성공률 90% 이상, 모든 채택 궤적의 새 simulator 재적분 통과, 모든 최적화 실패의 별도 집계입니다. 모든 항목이 통과했습니다. Teacher 연료 중앙값에 가장 가까운 22번 case를 대표로 정해 표준 재생 log와 240-frame GIF를 만들었습니다. 명령은 Git에서 제외되는 `artifacts/day21-teacher-validation/`에 `teacher-validation.json`, `representative-teacher.json`, `representative-teacher.gif`를 생성하며 기존 파일을 덮어쓰지 않습니다. 자세한 기준은 [21일차 기술 명세](docs/spec.ko.md#21일차-teacher-검증과-동결) 또는 [영문 명세](docs/spec.md#27-day-21-teacher-validation-and-freeze)에서 확인할 수 있습니다.
 
 ## 동결된 2주차 PID 기준선
 
@@ -370,7 +384,7 @@ Git에 포함되는 저장소에는 소스 코드, 재현 가능한 설정, 기�
 
 - 1주차: 시뮬레이터, 사건 처리, 기록, 재생과 수치 검증 - 완료
 - 2주차: suicide-burn과 동결 PID 기준선 - 완료
-- 3주차: 제약 최적제어 Teacher - 전체 평면 solver, 수치 튜닝과 100-case pipeline 완료, 다음은 품질 분석
+- 3주차: 제약 최적제어 Teacher - 전체 평면 solver, 수치 튜닝, 100-case pipeline, 검증, 비교와 protocol 동결 완료
 - 4주차: 데이터셋 생성과 Behavior Cloning
 - 5주차: DAgger 폐루프 개선
 - 6주차: 외란과 Monte Carlo 평가

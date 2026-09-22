@@ -8,14 +8,14 @@ A reproducible 2D reusable-rocket powered-landing project that progresses from r
 
 | Item | Current status |
 |---|---|
-| Roadmap | Week 3 multi-initial-condition teacher pipeline (Day 20) |
+| Roadmap | Week 3 teacher validation and freeze complete (Day 21) |
 | Model | Planar 3-DoF with variable mass |
 | State | x, z, vx, vz, theta, omega, mass |
 | Action | throttle, gimbal angle |
 | Current controllers | Suicide-burn, vertical PID, horizontal-attitude, and integrated landing |
 | Runtime | Python 3.12.7 |
 
-The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, a frozen integrated PID baseline, reproducible tuning, isolated-disturbance evaluation, and solved vertical, ideal-vector translation, and full planar 3-DoF optimal-control problems. The full planar objective has explicit physical scales, a measured fuel/smoothness trade-off, a four-mesh numerical study, and fine-step simulator replay checks. A timeout-safe Day 20 pipeline now generates compact teacher trajectories across reproducible initial-condition batches. Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
+The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, a frozen integrated PID baseline, reproducible tuning, isolated-disturbance evaluation, and solved vertical, ideal-vector translation, and full planar 3-DoF optimal-control problems. The full planar objective has explicit physical scales, a measured fuel/smoothness trade-off, a four-mesh numerical study, and fine-step simulator replay checks. The timeout-safe Day 20 pipeline generated 100 compact teacher trajectories, and Day 21 independently replayed them, compared them with PID on the same nominal set, selected a representative animation, and froze the teacher protocol. Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
 
 ## Optimal-control teacher formulation
 
@@ -74,6 +74,20 @@ python scripts/generate_teacher_pipeline.py --output-dir artifacts/day20-teacher
 The configured seed `20260920` produced batch SHA-256 `7a58dc505c4535e8f081544cea22de17743bff0d80f34debc9454b2029a9f9b9`. All 100 cases converged and passed independent simulator replay on their first attempt: one PID seed and 99 previous-success warm starts. There were no retries, timeouts, or failures. Mean propellant use was `27.349 kg` with a `24.669-30.571 kg` range, and total measured wall time was `126.246 s`. This passes the Day 20 execution gate; it is a finite nominal sample, not a disturbance-robustness guarantee.
 
 The command writes one JSON manifest and one compressed NPZ. The manifest contains the batch hash, policies, every attempt, solver/replay metrics, and an explicit failures list. The NPZ stores only accepted fixed-mesh trajectories with case indices, initial states, time nodes, seven-state nodes, throttle/gimbal controls, and durations. Both files are under the ignored `artifacts/` directory. See the [Day 20 specification](docs/spec.md#26-day-20-multi-initial-condition-teacher-pipeline) or [Korean version](docs/spec.ko.md#20일차-다중-초기조건-teacher-pipeline).
+
+## Day 21 teacher validation and freeze
+
+Day 21 freezes `planar-teacher-v1` with hashes for its complete generation configuration, the 100-case nominal set, and both Day 20 source artifacts. Validation rejects changed dynamics, controller seed policy, objective, mesh, replay tolerance, initial-condition range, episode count, seed, report, or trajectory archive. It also checks the JSON/NPZ schema, array shapes and metadata, accepted case indices, initial states, time nodes, actuator bounds, and explicit failure accounting before any comparison begins.
+
+~~~bash
+python scripts/validate_teacher.py
+~~~
+
+The command independently reintegrates all accepted control sequences at `0.01 s` and then runs the integrated PID on the exact same 100 initial states. The Teacher solved `100/100`; every independent replay passed terminal, altitude, propellant, tilt, angular-rate, throttle, gimbal, and node-agreement checks. PID landed `99/100`, with one crash that exceeded the final position, horizontal-speed, and angular-rate limits. On the 99 cases both methods landed, mean fuel use was `27.347 kg` for Teacher and `51.907 kg` for PID, a paired Teacher reduction of `24.560 kg`.
+
+Teacher generation took `126.246 s` wall time, with `1.236 s` mean accepted-attempt time. PID nominal evaluation took `20.661 s` including simulation; the controller itself used `5.609 s`, or about `0.483 ms` per control update. These clocks describe offline optimization and online command computation respectively, so the report preserves them separately instead of presenting a direct speed ratio.
+
+The Week 3 gate requires at least 90% solver success, every accepted trajectory to pass a fresh simulator replay, and every optimization failure to remain explicitly listed. All checks passed. Case 22, closest to the median Teacher fuel use, is saved as a standard replay log and a 240-frame GIF. The command produces `teacher-validation.json`, `representative-teacher.json`, and `representative-teacher.gif` under the ignored `artifacts/day21-teacher-validation/` directory and refuses to overwrite them. See the [Day 21 specification](docs/spec.md#27-day-21-teacher-validation-and-freeze) or [Korean version](docs/spec.ko.md#21일차-teacher-검증과-동결).
 
 ## Frozen Week 2 PID baseline
 
@@ -370,7 +384,7 @@ The tracked repository contains only source code, reproducible configuration, te
 
 - Week 1: simulator, event handling, logging, replay, and numerical verification - complete
 - Week 2: suicide-burn and frozen PID baseline - complete
-- Week 3: constrained optimal-control teacher - full planar solver, numerical tuning, and 100-case pipeline complete; quality analysis next
+- Week 3: constrained optimal-control teacher - full planar solver, numerical tuning, 100-case pipeline, validation, comparison, and protocol freeze complete
 - Week 4: dataset generation and Behavior Cloning
 - Week 5: DAgger closed-loop improvement
 - Week 6: disturbances and Monte Carlo evaluation

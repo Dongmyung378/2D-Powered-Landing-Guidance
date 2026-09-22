@@ -68,6 +68,39 @@ def test_frozen_pid_baseline_protocol_loads() -> None:
     assert protocol["acceptance"]["minimum_success_rate"] == 0.70
 
 
+def test_frozen_teacher_protocol_loads() -> None:
+    config = plg.load_config(ROOT / "configs/pid-baseline-v1.yaml")
+    protocol = config["teacher_protocol"]
+
+    assert protocol["id"] == "planar-teacher-v1"
+    assert protocol["frozen"] is True
+    assert protocol["nominal_test_set"]["episodes"] == 100
+    assert protocol["acceptance"]["minimum_solver_success_rate"] == 0.90
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("frozen",), False, "frozen"),
+        (("configuration_sha256",), "invalid", "configuration_sha256"),
+        (("nominal_test_set", "episodes"), 0, "episodes"),
+        (("source_artifacts", "report_sha256"), "invalid", "report_sha256"),
+        (("acceptance", "minimum_solver_success_rate"), 1.1, "success_rate"),
+        (("acceptance", "require_all_accepted_replays"), False, "accepted_replays"),
+        (("representative_case", "selection"), "first", "median_fuel"),
+    ],
+)
+def test_config_rejects_invalid_teacher_protocol(path, value, message) -> None:
+    config = deepcopy(plg.load_config(ROOT / "configs/pid-baseline-v1.yaml"))
+    target = config["teacher_protocol"]
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+
+    with pytest.raises(plg.ConfigError, match=message):
+        plg.validate_config(config)
+
+
 @pytest.mark.parametrize(
     ("path", "value", "message"),
     [
