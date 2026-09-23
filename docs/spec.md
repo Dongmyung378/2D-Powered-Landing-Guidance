@@ -608,3 +608,31 @@ python scripts/validate_teacher.py
 ~~~
 
 The command refuses to overwrite any output and writes exactly three files: `teacher-validation.json` with protocol verification, Teacher/PID metrics, constraint analysis, per-case PID results, independent replay results, failure accounting, comparison, and gate decisions; `representative-teacher.json` with the replayable selected episode; and `representative-teacher.gif` with its animation. The Week 3 gate requires at least 90% solver success, every accepted solution to pass both its stored and fresh replay checks, and all failed optimization cases to be reported separately. All six protocol and acceptance checks passed. The result is limited to the frozen, wind-free nominal sample; disturbance robustness, actuator bandwidth, model mismatch, hard control-rate constraints, and hardware safety remain unproven.
+
+## 28. Day 22 dataset contract and split design
+
+Day 22 defines the inputs to offline Behavior Cloning before producing a large trajectory collection. `planar-bc-v1` uses the ordered state `[x,z,vx,vz,theta,omega,mass]` in `m,m,m/s,m/s,rad,rad/s,kg` and action `[throttle,gimbal_angle]` in `1,rad`. An accepted trajectory with `T+1` states has `T` interval actions. Its first `T` states are supervised inputs and its terminal state is validation-only. Physical values are stored as float64 and may be cast to float32 only after schema validation.
+
+Variable-length trajectories use one `packed_npz_v1` shard per split with separate state and action offsets and `allow_pickle=False`. Each record includes stable trajectory and initial-condition IDs, source index, duration, time, states, actions, both solver-stage iteration counts, hard and terminal residuals, replay checks, normalized replay error ratios, fuel use, and attempt count. Failed attempts remain explicit in a manifest and are excluded from shards. NaN, infinite values, malformed offsets, nonincreasing time, state-action count mismatch, failed replay, and duplicate initial-condition IDs are rejection conditions.
+
+The split unit is a complete trajectory. The initial-condition ID is SHA-256 over canonical little-endian float64 bytes of the seven-state vector and is calculated without a split label. Generation fails on any duplicate within one split or overlap across train, validation, and test. Distinct deterministic seeds are used for all splits. Train and validation share the easy envelope so validation measures IID model selection; validation still never contributes gradients or normalization statistics.
+
+| Field | Train and validation | Hard OOD test |
+|---|---:|---:|
+| Absolute horizontal offset | 2-10 m | 12-20 m |
+| Altitude | 70-105 m | 110-140 m |
+| Horizontal velocity | -1.5 to 1.5 m/s | -4 to 4 m/s |
+| Vertical velocity | -22 to -15 m/s | -32 to -24 m/s |
+| Attitude | -3 to 3 deg | -10 to 10 deg |
+| Angular rate | -1.5 to 1.5 deg/s | -5 to 5 deg/s |
+| Mass | 970-1000 kg | 900-960 kg |
+
+The train, validation, and test plans contain 800, 100, and 200 trajectories with seeds `20260922`, `20261022`, and `20261122`. The test range is strictly separated from train in absolute horizontal offset, altitude, descent speed, and mass. Therefore every planned hard-test case starts farther away, higher, descending faster, and with less available propellant than every train case. Its other dynamic envelopes are also wider. Configuration validation rejects a plan that loses any of these relations.
+
+Normalization is a standard score fitted only to aligned nonterminal state-action rows from accepted train trajectories. Each stored scale is `max(population_standard_deviation, 1e-6)`. Count, mean, population standard deviation, applied scale, minimum, and maximum are accumulated and stored as float64. Angles remain in radians. At inference, the state is normalized, the predicted action is denormalized, and physical actuator clipping is applied. Final numeric statistics do not exist until the train trajectories are generated on Days 23 and 24.
+
+~~~bash
+python scripts/design_offline_dataset.py
+~~~
+
+The command writes a JSON contract report and compressed NPZ containing the six deterministic initial-state and ID arrays. It refuses to overwrite either output. The Day 22 completion gate checks the full state, action, trajectory, initial-condition, and solver-quality schema; all split ranges; absence of trajectory leakage; train-only normalization; and a strictly harder test range. Generated files remain under the Git-ignored `artifacts/day22-dataset-design/` directory. The human-readable [dataset card](dataset-card.md) and its [Korean version](dataset-card.ko.md) document intended use and limitations.

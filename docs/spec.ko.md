@@ -611,3 +611,31 @@ python scripts/validate_teacher.py
 ~~~
 
 명령은 결과를 덮어쓰지 않으며 정확히 세 파일을 생성합니다. `teacher-validation.json`에는 protocol 검증, Teacher·PID 지표, 제약 분석, PID case별 결과, 독립 재적분 결과, 실패 집계, 비교와 통과 판정이 들어갑니다. `representative-teacher.json`은 선택된 표준 재생 episode이고 `representative-teacher.gif`는 해당 애니메이션입니다. 3주차 통과 기준은 solver 성공률 90% 이상, 모든 채택 해의 기존·신규 재적분 통과, 모든 최적화 실패의 별도 집계입니다. Protocol과 완료 기준 검사 6개가 모두 통과했습니다. 이 결과는 동결된 무풍 명목 표본에 한정되며 외란 강건성, 구동기 대역폭, 모델 불일치, hard 제어 변화율 제한과 하드웨어 안전은 아직 검증하지 않았습니다.
+
+## 22일차 데이터셋 규약과 split 설계
+
+22일차에는 대규모 궤적을 만들기 전에 offline Behavior Cloning 입력을 정의합니다. `planar-bc-v1` 상태 순서는 `[x,z,vx,vz,theta,omega,mass]`, 단위는 `m,m,m/s,m/s,rad,rad/s,kg`입니다. Action 순서는 `[throttle,gimbal_angle]`, 단위는 `1,rad`입니다. 상태가 `T+1`개인 채택 trajectory에는 구간 action `T`개가 있습니다. 앞의 상태 `T`개만 지도학습 입력으로 사용하고 종단 상태는 검증에만 사용합니다. 물리값은 float64로 저장하며 schema를 검사한 뒤 학습 loader가 batch를 float32로 바꿀 수 있습니다.
+
+길이가 다른 trajectory는 split별 `packed_npz_v1` shard 하나에 이어 붙이고 별도의 상태·action offset으로 복원합니다. Pickle은 허용하지 않습니다. 각 기록에는 안정적인 trajectory·initial-condition ID, 원본 index, 종료시간, 시간·상태·action 값, solver 두 단계 반복 수, hard·종단 잔차, 재적분 검사와 정규화 오차비, 연료 사용량, 시도 수가 들어갑니다. 실패한 시도는 manifest에 명시하고 shard에서는 제외합니다. NaN·무한값, 잘못된 offset, 증가하지 않는 시간, 상태·action 개수 불일치, 재적분 실패와 initial-condition ID 중복은 모두 거부 조건입니다.
+
+Split 단위는 완전한 trajectory입니다. Initial-condition ID는 split label 없이 7상태 vector의 canonical little-endian float64 byte에서 SHA-256으로 계산합니다. 한 split 안의 중복 또는 train, validation, test 사이의 겹침이 하나라도 있으면 생성을 실패 처리합니다. 각 split은 서로 다른 고정 seed를 사용합니다. Train과 validation은 같은 쉬운 범위라서 validation은 IID model 선택을 측정하지만, gradient와 normalization 통계에는 참여하지 않습니다.
+
+| Field | Train·validation | Hard OOD test |
+|---|---:|---:|
+| 수평 절대 오차 | 2-10 m | 12-20 m |
+| 고도 | 70-105 m | 110-140 m |
+| 수평속도 | -1.5-1.5 m/s | -4-4 m/s |
+| 수직속도 | -22에서 -15 m/s | -32에서 -24 m/s |
+| 자세 | -3-3 deg | -10-10 deg |
+| 각속도 | -1.5-1.5 deg/s | -5-5 deg/s |
+| 질량 | 970-1000 kg | 900-960 kg |
+
+Train, validation, test 계획은 각각 800, 100, 200개이며 seed는 `20260922`, `20261022`, `20261122`입니다. Test는 수평 절대 오차, 고도, 하강속도와 질량이 train과 엄격히 분리됩니다. 따라서 계획된 모든 hard-test case는 모든 train case보다 멀고, 높고, 더 빠르게 하강하며, 사용할 수 있는 추진제가 적습니다. 나머지 운동 범위도 더 넓습니다. 이 관계가 하나라도 없어지면 설정 검증이 실패합니다.
+
+Normalization은 채택 train trajectory의 서로 정렬된 비종단 상태·action row만 사용해 standard score를 계산합니다. Feature별 scale은 `max(모집단 표준편차, 1e-6)`입니다. Count, 평균, 모집단 표준편차, 실제 scale, 최솟값과 최댓값을 float64로 누적·저장하고 각도는 rad를 유지합니다. 추론에서는 상태를 normalize하고 예측 action을 denormalize한 다음 물리 구동기 제한을 적용합니다. 실제 수치 통계는 23-24일차에 train trajectory를 생성한 뒤에만 계산할 수 있습니다.
+
+~~~bash
+python scripts/design_offline_dataset.py
+~~~
+
+명령은 JSON 규약 보고서와 결정적인 초기상태·ID 배열 6개를 담은 압축 NPZ를 생성하며 기존 결과를 덮어쓰지 않습니다. 22일차 완료 gate는 상태, action, trajectory, initial condition과 solver 품질 schema, 세 split 범위, trajectory leakage 부재, train 전용 normalization과 엄격히 더 어려운 test 범위를 검사합니다. 생성 파일은 Git에서 제외되는 `artifacts/day22-dataset-design/`에 둡니다. 사용 목적과 한계는 [한국어 데이터셋 카드](dataset-card.ko.md)와 [영문 데이터셋 카드](dataset-card.md)에 정리합니다.

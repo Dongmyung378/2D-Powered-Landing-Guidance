@@ -277,6 +277,63 @@ teacher_protocol:
   representative_case:
     selection: median_fuel
 
+offline_dataset:
+  schema_version: 1
+  id: planar-bc-v1
+  storage:
+    format: packed_npz_v1
+    numeric_dtype: float64
+    training_dtype: float32
+    split_unit: trajectory
+  normalization:
+    method: standard_score
+    fit_split: train
+    statistics_dtype: float64
+    minimum_scale: 1.0e-6
+  splits:
+    train:
+      sampler: signed_uniform_v1
+      difficulty: easy_nominal
+      episodes: 800
+      seed: 20260922
+      ranges:
+        x_m: [-10.0, 10.0]
+        min_abs_x_m: 2.0
+        z_m: [70.0, 105.0]
+        vx_m_s: [-1.5, 1.5]
+        vz_m_s: [-22.0, -15.0]
+        theta_deg: [-3.0, 3.0]
+        omega_deg_s: [-1.5, 1.5]
+        mass_kg: [970.0, 1000.0]
+    validation:
+      sampler: signed_uniform_v1
+      difficulty: easy_iid
+      episodes: 100
+      seed: 20261022
+      ranges:
+        x_m: [-10.0, 10.0]
+        min_abs_x_m: 2.0
+        z_m: [70.0, 105.0]
+        vx_m_s: [-1.5, 1.5]
+        vz_m_s: [-22.0, -15.0]
+        theta_deg: [-3.0, 3.0]
+        omega_deg_s: [-1.5, 1.5]
+        mass_kg: [970.0, 1000.0]
+    test:
+      sampler: signed_uniform_v1
+      difficulty: hard_ood
+      episodes: 200
+      seed: 20261122
+      ranges:
+        x_m: [-20.0, 20.0]
+        min_abs_x_m: 12.0
+        z_m: [110.0, 140.0]
+        vx_m_s: [-4.0, 4.0]
+        vz_m_s: [-32.0, -24.0]
+        theta_deg: [-10.0, 10.0]
+        omega_deg_s: [-5.0, 5.0]
+        mass_kg: [900.0, 960.0]
+
 baseline_protocol:
   id: pid-baseline-v1
   controller: integrated-pid

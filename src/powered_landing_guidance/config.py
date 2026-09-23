@@ -653,6 +653,138 @@ def validate_config(config: Config) -> None:
         if representative_case.get("selection") != "median_fuel":
             raise ConfigError("teacher representative selection must be 'median_fuel'")
 
+        offline_dataset = _mapping(config, "offline_dataset")
+        if set(offline_dataset) != {
+            "schema_version",
+            "id",
+            "storage",
+            "normalization",
+            "splits",
+        }:
+            raise ConfigError("offline_dataset keys are invalid")
+        if offline_dataset.get("schema_version") != 1:
+            raise ConfigError("offline_dataset.schema_version must be 1")
+        dataset_id = offline_dataset.get("id")
+        if not isinstance(dataset_id, str) or not dataset_id.strip():
+            raise ConfigError("offline_dataset.id must be a nonempty string")
+
+        storage = _mapping(offline_dataset, "storage")
+        if set(storage) != {"format", "numeric_dtype", "training_dtype", "split_unit"}:
+            raise ConfigError("offline_dataset storage keys are invalid")
+        if storage.get("format") != "packed_npz_v1":
+            raise ConfigError("offline_dataset storage format must be 'packed_npz_v1'")
+        if storage.get("numeric_dtype") != "float64":
+            raise ConfigError("offline_dataset numeric_dtype must be 'float64'")
+        if storage.get("training_dtype") != "float32":
+            raise ConfigError("offline_dataset training_dtype must be 'float32'")
+        if storage.get("split_unit") != "trajectory":
+            raise ConfigError("offline_dataset split_unit must be 'trajectory'")
+
+        normalization = _mapping(offline_dataset, "normalization")
+        if set(normalization) != {
+            "method",
+            "fit_split",
+            "statistics_dtype",
+            "minimum_scale",
+        }:
+            raise ConfigError("offline_dataset normalization keys are invalid")
+        if normalization.get("method") != "standard_score":
+            raise ConfigError("offline_dataset normalization method must be 'standard_score'")
+        if normalization.get("fit_split") != "train":
+            raise ConfigError("offline_dataset normalization fit_split must be 'train'")
+        if normalization.get("statistics_dtype") != "float64":
+            raise ConfigError("offline_dataset statistics_dtype must be 'float64'")
+        _positive(normalization, "minimum_scale")
+
+        splits = _mapping(offline_dataset, "splits")
+        if set(splits) != {"train", "validation", "test"}:
+            raise ConfigError("offline_dataset splits must be train, validation, and test")
+        expected_difficulties = {
+            "train": "easy_nominal",
+            "validation": "easy_iid",
+            "test": "hard_ood",
+        }
+        range_keys = {
+            "x_m",
+            "min_abs_x_m",
+            "z_m",
+            "vx_m_s",
+            "vz_m_s",
+            "theta_deg",
+            "omega_deg_s",
+            "mass_kg",
+        }
+        parsed_ranges: dict[str, dict[str, tuple[float, float] | float]] = {}
+        split_seeds: list[int] = []
+        for split_name, expected_difficulty in expected_difficulties.items():
+            split = _mapping(splits, split_name)
+            if set(split) != {"sampler", "difficulty", "episodes", "seed", "ranges"}:
+                raise ConfigError(f"offline_dataset {split_name} keys are invalid")
+            if split.get("sampler") != "signed_uniform_v1":
+                raise ConfigError(f"offline_dataset {split_name} sampler is invalid")
+            if split.get("difficulty") != expected_difficulty:
+                raise ConfigError(f"offline_dataset {split_name} difficulty is invalid")
+            _positive_integer(split, "episodes")
+            split_seeds.append(_nonnegative_integer(split, "seed"))
+            ranges = _mapping(split, "ranges")
+            if set(ranges) != range_keys:
+                raise ConfigError(f"offline_dataset {split_name} range keys are invalid")
+            x_range = _range(ranges, "x_m")
+            min_abs_x = _positive(ranges, "min_abs_x_m")
+            z_range = _range(ranges, "z_m")
+            vx_range = _range(ranges, "vx_m_s")
+            vz_range = _range(ranges, "vz_m_s")
+            theta_range = _range(ranges, "theta_deg")
+            omega_range = _range(ranges, "omega_deg_s")
+            dataset_mass_range = _range(ranges, "mass_kg")
+            if not x_range[0] < target_x - min_abs_x < target_x + min_abs_x < x_range[1]:
+                raise ConfigError(
+                    f"offline_dataset {split_name} x_m must cover both sides of min_abs_x_m"
+                )
+            if z_range[0] <= ground:
+                raise ConfigError(f"offline_dataset {split_name} z_m must be above ground")
+            if vz_range[1] >= 0.0:
+                raise ConfigError(f"offline_dataset {split_name} vz_m_s must be descending")
+            if dataset_mass_range[0] <= dry_mass + reserve:
+                raise ConfigError(
+                    f"offline_dataset {split_name} mass must exceed dry mass plus reserve"
+                )
+            if max(abs(theta_range[0]), abs(theta_range[1])) > tilt_limit:
+                raise ConfigError(f"offline_dataset {split_name} theta exceeds solver limit")
+            if max(abs(omega_range[0]), abs(omega_range[1])) > angular_rate_limit:
+                raise ConfigError(f"offline_dataset {split_name} omega exceeds solver limit")
+            parsed_ranges[split_name] = {
+                "x_m": x_range,
+                "min_abs_x_m": min_abs_x,
+                "z_m": z_range,
+                "vx_m_s": vx_range,
+                "vz_m_s": vz_range,
+                "theta_deg": theta_range,
+                "omega_deg_s": omega_range,
+                "mass_kg": dataset_mass_range,
+            }
+        if len(set(split_seeds)) != len(split_seeds):
+            raise ConfigError("offline_dataset split seeds must be distinct")
+        if splits["validation"]["ranges"] != splits["train"]["ranges"]:
+            raise ConfigError("offline_dataset validation ranges must match train ranges")
+
+        train_ranges = parsed_ranges["train"]
+        test_ranges = parsed_ranges["test"]
+        harder_test_checks = (
+            test_ranges["min_abs_x_m"] > max(abs(value) for value in train_ranges["x_m"]),
+            test_ranges["z_m"][0] > train_ranges["z_m"][1],
+            test_ranges["vz_m_s"][1] < train_ranges["vz_m_s"][0],
+            test_ranges["mass_kg"][1] < train_ranges["mass_kg"][0],
+            test_ranges["vx_m_s"][0] < train_ranges["vx_m_s"][0]
+            and test_ranges["vx_m_s"][1] > train_ranges["vx_m_s"][1],
+            test_ranges["theta_deg"][0] < train_ranges["theta_deg"][0]
+            and test_ranges["theta_deg"][1] > train_ranges["theta_deg"][1],
+            test_ranges["omega_deg_s"][0] < train_ranges["omega_deg_s"][0]
+            and test_ranges["omega_deg_s"][1] > train_ranges["omega_deg_s"][1],
+        )
+        if not all(harder_test_checks):
+            raise ConfigError("offline_dataset test ranges must be strictly harder than train")
+
     baseline_protocol = config.get("baseline_protocol")
     if baseline_protocol is not None:
         if not isinstance(baseline_protocol, dict):

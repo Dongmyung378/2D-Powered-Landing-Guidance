@@ -8,14 +8,14 @@ A reproducible 2D reusable-rocket powered-landing project that progresses from r
 
 | Item | Current status |
 |---|---|
-| Roadmap | Week 3 teacher validation and freeze complete (Day 21) |
+| Roadmap | Week 4 dataset contract and split design complete (Day 22) |
 | Model | Planar 3-DoF with variable mass |
 | State | x, z, vx, vz, theta, omega, mass |
 | Action | throttle, gimbal angle |
 | Current controllers | Suicide-burn, vertical PID, horizontal-attitude, and integrated landing |
 | Runtime | Python 3.12.7 |
 
-The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, a frozen integrated PID baseline, reproducible tuning, isolated-disturbance evaluation, and solved vertical, ideal-vector translation, and full planar 3-DoF optimal-control problems. The full planar objective has explicit physical scales, a measured fuel/smoothness trade-off, a four-mesh numerical study, and fine-step simulator replay checks. The timeout-safe Day 20 pipeline generated 100 compact teacher trajectories, and Day 21 independently replayed them, compared them with PID on the same nominal set, selected a representative animation, and froze the teacher protocol. Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
+The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, a frozen integrated PID baseline, reproducible tuning, isolated-disturbance evaluation, and solved vertical, ideal-vector translation, and full planar 3-DoF optimal-control problems. The timeout-safe Day 20 pipeline generated 100 compact teacher trajectories, and Day 21 independently replayed them, compared them with PID, selected a representative animation, and froze the teacher protocol. Day 22 now defines a machine-readable dataset schema, leakage-safe trajectory splits, a deliberately harder test envelope, and train-only normalization rules. Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
 
 ## Optimal-control teacher formulation
 
@@ -88,6 +88,20 @@ The command independently reintegrates all accepted control sequences at `0.01 s
 Teacher generation took `126.246 s` wall time, with `1.236 s` mean accepted-attempt time. PID nominal evaluation took `20.661 s` including simulation; the controller itself used `5.609 s`, or about `0.483 ms` per control update. These clocks describe offline optimization and online command computation respectively, so the report preserves them separately instead of presenting a direct speed ratio.
 
 The Week 3 gate requires at least 90% solver success, every accepted trajectory to pass a fresh simulator replay, and every optimization failure to remain explicitly listed. All checks passed. Case 22, closest to the median Teacher fuel use, is saved as a standard replay log and a 240-frame GIF. The command produces `teacher-validation.json`, `representative-teacher.json`, and `representative-teacher.gif` under the ignored `artifacts/day21-teacher-validation/` directory and refuses to overwrite them. See the [Day 21 specification](docs/spec.md#27-day-21-teacher-validation-and-freeze) or [Korean version](docs/spec.ko.md#21일차-teacher-검증과-동결).
+
+## Day 22 dataset contract and split design
+
+Day 22 defines `planar-bc-v1` before large-scale trajectory generation begins. The stored sample is a seven-state nonterminal node paired with the following two-control interval. Complete trajectories, not individual rows, are assigned to one of three physical shards. Stable initial-condition IDs detect duplicates within a split and overlap across splits. Failed solver attempts stay in the manifest and never become training labels.
+
+The deterministic plan contains 800 easy train, 100 easy IID validation, and 200 hard OOD test initial conditions. Every test case is farther from the pad, higher, descending faster, and has less available propellant than every train case; its horizontal-speed, attitude, and angular-rate envelopes are also wider. Normalization uses only accepted nonterminal train pairs, stores float64 population statistics, and applies a `1e-6` scale floor. Numeric statistics will be computed after the accepted train trajectories exist on Days 23 and 24.
+
+The generated plan passed all five completion checks with zero duplicate IDs inside a split and zero overlaps between splits. Its configuration digest is `7a45d09cc8d21bc795615538e6cf9c69a6a08eee58ffd1561228ecbc62f929f9`. The train, validation, and test initial-state digests are `06e0203d6ffb9f26687ce6d734fb9010c969b9cb7d139bbef22a1231311937d1`, `ca45656bf8785808716bb522f201bfa72827f45af21d67e98c1485e2652070eb`, and `b244481859f99fd19c3ba44235fbd8f6afb4d31b04e59fa37e9d67c173420725`.
+
+~~~bash
+python scripts/design_offline_dataset.py
+~~~
+
+The command validates all five completion checks and writes `dataset-design.json` plus `initial-condition-plan.npz` under the ignored `artifacts/day22-dataset-design/` directory. It refuses to overwrite either file. See the [dataset card](docs/dataset-card.md), [Day 22 specification](docs/spec.md#28-day-22-dataset-contract-and-split-design), and their [Korean dataset card](docs/dataset-card.ko.md) and [specification](docs/spec.ko.md#22일차-데이터셋-규약과-split-설계).
 
 ## Frozen Week 2 PID baseline
 
@@ -372,6 +386,7 @@ When enabled, coupling compensation divides the requested base throttle by `cos(
 README.md / README.ko.md        English default and Korean project overview
 configs/                        Shared experiment configuration
 docs/spec.md / docs/spec.ko.md  English default and Korean technical specification
+docs/dataset-card*.md           English default and Korean dataset documentation
 scripts/                        Reproducible experiment entry points
 src/powered_landing_guidance/   Physics, environment, controllers, and visualization
 tests/                          Regression, boundary, and controller tests
@@ -385,7 +400,7 @@ The tracked repository contains only source code, reproducible configuration, te
 - Week 1: simulator, event handling, logging, replay, and numerical verification - complete
 - Week 2: suicide-burn and frozen PID baseline - complete
 - Week 3: constrained optimal-control teacher - full planar solver, numerical tuning, 100-case pipeline, validation, comparison, and protocol freeze complete
-- Week 4: dataset generation and Behavior Cloning
+- Week 4: dataset contract and split design complete; trajectory generation and Behavior Cloning next
 - Week 5: DAgger closed-loop improvement
 - Week 6: disturbances and Monte Carlo evaluation
 - Week 7: report, comparison visuals, and interactive demo

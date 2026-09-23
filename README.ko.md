@@ -8,14 +8,14 @@
 
 | 항목 | 현재 상태 |
 |---|---|
-| 로드맵 | 3주차 Teacher 검증·동결 완료(21일차) |
+| 로드맵 | 4주차 데이터셋 규약·split 설계 완료(22일차) |
 | 모델 | 가변 질량 평면 3자유도 |
 | 상태 | x, z, vx, vz, theta, omega, mass |
 | 제어 | throttle, gimbal angle |
 | 현재 제어기 | Suicide-burn, 수직 PID, 수평·자세 제어, 통합 착륙 제어 |
 | 실행 환경 | Python 3.12.7 |
 
-현재 저장소에는 검증된 시뮬레이션 환경, 두 가지 비학습 수직 착륙 기준선, 수평 위치·자세 직렬 제어기, 동결된 통합 PID 기준선, 재현 가능한 튜닝, 분리 외란 평가, 수직·이상 추력 방향 병진·전체 평면 3자유도 최적제어 문제가 구현되어 있습니다. 전체 평면 목적함수의 물리 척도 정규화, 연료·제어 평활성 trade-off, 네 가지 mesh 비교와 세밀한 simulator 재적분 검증도 포함합니다. 20일차에는 재현 가능한 초기조건 100개에서 압축 Teacher 궤적을 생성했고, 21일차에는 이를 독립 재적분하고 같은 조건의 PID와 비교한 뒤 대표 애니메이션과 동결 protocol을 완성했습니다. Behavior Cloning, DAgger, 복합 불확실성과 더 넓은 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
+현재 저장소에는 검증된 시뮬레이션 환경, 두 가지 비학습 수직 착륙 기준선, 수평 위치·자세 직렬 제어기, 동결된 통합 PID 기준선, 재현 가능한 튜닝, 분리 외란 평가, 수직·이상 추력 방향 병진·전체 평면 3자유도 최적제어 문제가 구현되어 있습니다. 20일차에는 재현 가능한 초기조건 100개에서 압축 Teacher 궤적을 생성했고, 21일차에는 이를 독립 재적분하고 PID와 비교한 뒤 대표 애니메이션과 동결 protocol을 완성했습니다. 22일차에는 machine-readable 데이터셋 schema, trajectory 단위 leakage 방지 split, 의도적으로 더 어려운 test 범위와 train 전용 normalization 규약을 정의했습니다. Behavior Cloning, DAgger, 복합 불확실성과 더 넓은 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
 
 ## 최적제어 Teacher 문제 정식화
 
@@ -88,6 +88,20 @@ python scripts/validate_teacher.py
 Teacher 생성 전체 측정시간은 `126.246 s`, 채택 시도 평균은 `1.236 s`였습니다. PID 명목 평가는 시뮬레이션을 포함해 `20.661 s`였고, 제어 명령 계산 자체는 합계 `5.609 s`, update당 약 `0.483 ms`였습니다. 앞 수치는 offline 최적화이고 뒤 수치는 online 제어 계산이므로 보고서에서는 직접 속도비로 합치지 않고 분리했습니다.
 
 3주차 통과 기준은 solver 성공률 90% 이상, 모든 채택 궤적의 새 simulator 재적분 통과, 모든 최적화 실패의 별도 집계입니다. 모든 항목이 통과했습니다. Teacher 연료 중앙값에 가장 가까운 22번 case를 대표로 정해 표준 재생 log와 240-frame GIF를 만들었습니다. 명령은 Git에서 제외되는 `artifacts/day21-teacher-validation/`에 `teacher-validation.json`, `representative-teacher.json`, `representative-teacher.gif`를 생성하며 기존 파일을 덮어쓰지 않습니다. 자세한 기준은 [21일차 기술 명세](docs/spec.ko.md#21일차-teacher-검증과-동결) 또는 [영문 명세](docs/spec.md#27-day-21-teacher-validation-and-freeze)에서 확인할 수 있습니다.
+
+## 22일차 데이터셋 규약과 split 설계
+
+22일차에는 대규모 궤적 생성 전에 `planar-bc-v1`을 정의했습니다. 저장 sample은 7상태 비종단 node와 그 다음 구간의 2제어를 한 쌍으로 사용합니다. 개별 row가 아니라 완전한 trajectory를 세 물리 shard 중 하나에만 배정합니다. Split과 무관하게 계산한 initial-condition ID로 split 내부 중복과 split 사이 겹침을 탐지합니다. 실패한 solver 시도는 manifest에 남기며 학습 label에는 넣지 않습니다.
+
+결정적 계획은 쉬운 train 800개, 같은 분포의 validation 100개와 어려운 OOD test 200개입니다. 모든 test case는 모든 train case보다 pad에서 멀고, 높고, 더 빠르게 하강하며, 사용할 수 있는 추진제가 적습니다. 수평속도, 자세와 각속도 범위도 더 넓습니다. Normalization은 채택된 train의 비종단 pair만 사용하고, float64 모집단 통계와 `1e-6` scale 하한을 저장합니다. 실제 수치 통계는 23-24일차에 채택 train 궤적이 만들어진 뒤 계산합니다.
+
+생성 계획은 split 내부 중복 0개, split 사이 겹침 0개로 다섯 완료 검사를 모두 통과했습니다. Dataset 설정 digest는 `7a45d09cc8d21bc795615538e6cf9c69a6a08eee58ffd1561228ecbc62f929f9`입니다. Train, validation, test 초기상태 digest는 각각 `06e0203d6ffb9f26687ce6d734fb9010c969b9cb7d139bbef22a1231311937d1`, `ca45656bf8785808716bb522f201bfa72827f45af21d67e98c1485e2652070eb`, `b244481859f99fd19c3ba44235fbd8f6afb4d31b04e59fa37e9d67c173420725`입니다.
+
+~~~bash
+python scripts/design_offline_dataset.py
+~~~
+
+명령은 다섯 완료 검사를 모두 수행하고 Git에서 제외되는 `artifacts/day22-dataset-design/`에 `dataset-design.json`과 `initial-condition-plan.npz`를 생성합니다. 기존 파일은 덮어쓰지 않습니다. 자세한 내용은 [한국어 데이터셋 카드](docs/dataset-card.ko.md), [22일차 기술 명세](docs/spec.ko.md#22일차-데이터셋-규약과-split-설계), [영문 데이터셋 카드](docs/dataset-card.md)와 [영문 명세](docs/spec.md#28-day-22-dataset-contract-and-split-design)에서 확인할 수 있습니다.
 
 ## 동결된 2주차 PID 기준선
 
@@ -372,6 +386,7 @@ Coupling 보상을 켜면 기본 throttle을 `cos(theta + gimbal)`로 나누어 
 README.md / README.ko.md        영문 기본·한국어 프로젝트 소개
 configs/                        공용 실험 설정
 docs/spec.md / docs/spec.ko.md  영문 기본·한국어 기술 명세
+docs/dataset-card*.md           영문 기본·한국어 데이터셋 문서
 scripts/                        재현 가능한 실험 실행 명령
 src/powered_landing_guidance/   물리, 환경, 제어기와 시각화
 tests/                          회귀, 경계 조건과 제어기 테스트
@@ -385,7 +400,7 @@ Git에 포함되는 저장소에는 소스 코드, 재현 가능한 설정, 기�
 - 1주차: 시뮬레이터, 사건 처리, 기록, 재생과 수치 검증 - 완료
 - 2주차: suicide-burn과 동결 PID 기준선 - 완료
 - 3주차: 제약 최적제어 Teacher - 전체 평면 solver, 수치 튜닝, 100-case pipeline, 검증, 비교와 protocol 동결 완료
-- 4주차: 데이터셋 생성과 Behavior Cloning
+- 4주차: 데이터셋 규약·split 설계 완료, 궤적 생성과 Behavior Cloning 진행 예정
 - 5주차: DAgger 폐루프 개선
 - 6주차: 외란과 Monte Carlo 평가
 - 7주차: 보고서, 비교 시각화와 조작 화면

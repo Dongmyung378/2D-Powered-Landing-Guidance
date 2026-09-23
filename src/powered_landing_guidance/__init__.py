@@ -29,6 +29,15 @@ from powered_landing_guidance.model import (
     Control,
     State,
 )
+from powered_landing_guidance.offline_dataset import (
+    build_dataset_design,
+    compute_training_normalization_statistics,
+    dataset_configuration_sha256,
+    harder_test_analysis,
+    initial_condition_id,
+    sample_split_initial_states,
+    validate_split_integrity,
+)
 from powered_landing_guidance.optimal_control import (
     LandingOptimalControlProblem,
     ObjectiveScales,
@@ -54,15 +63,22 @@ __all__ = [
     "VerticalVelocityPIDController",
     "VerticalVelocityProfile",
     "classify_ignition_timing",
+    "build_dataset_design",
+    "compute_training_normalization_statistics",
+    "dataset_configuration_sha256",
     "estimate_suicide_burn",
     "estimate_variable_mass_suicide_burn",
     "frozen_baseline_initial_states",
     "frozen_teacher_initial_states",
+    "harder_test_analysis",
     "initial_condition_sha256",
+    "initial_condition_id",
     "integrated_controller_sha256",
     "load_config",
     "sample_integrated_initial_states",
+    "sample_split_initial_states",
     "teacher_configuration_sha256",
+    "validate_split_integrity",
     "validate_config",
 ]
 
