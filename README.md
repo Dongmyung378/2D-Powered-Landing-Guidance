@@ -8,14 +8,14 @@ A reproducible 2D reusable-rocket powered-landing project that progresses from r
 
 | Item | Current status |
 |---|---|
-| Roadmap | Week 4 dataset contract and split design complete (Day 22) |
+| Roadmap | Week 4 easy-split Teacher generation complete (Day 23) |
 | Model | Planar 3-DoF with variable mass |
 | State | x, z, vx, vz, theta, omega, mass |
 | Action | throttle, gimbal angle |
 | Current controllers | Suicide-burn, vertical PID, horizontal-attitude, and integrated landing |
 | Runtime | Python 3.12.7 |
 
-The repository currently provides a tested simulation environment, two non-learning vertical landing baselines, cascaded horizontal-position and attitude control, a frozen integrated PID baseline, reproducible tuning, isolated-disturbance evaluation, and solved vertical, ideal-vector translation, and full planar 3-DoF optimal-control problems. The timeout-safe Day 20 pipeline generated 100 compact teacher trajectories, and Day 21 independently replayed them, compared them with PID, selected a representative animation, and froze the teacher protocol. Day 22 now defines a machine-readable dataset schema, leakage-safe trajectory splits, a deliberately harder test envelope, and train-only normalization rules. Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
+The repository currently provides a tested simulation environment, frozen PID and optimal-control Teacher baselines, reproducible tuning, isolated-disturbance evaluation, and full planar 3-DoF optimal control. Day 22 defined the offline-dataset schema, leakage-safe trajectory splits, harder test envelope, and train-only normalization rules. Day 23 then executed all 800 planned easy training conditions and retained 797 verified Teacher trajectories in the packed training shard. Hard-range generation, coverage balancing, Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
 
 ## Optimal-control teacher formulation
 
@@ -102,6 +102,18 @@ python scripts/design_offline_dataset.py
 ~~~
 
 The command validates all five completion checks and writes `dataset-design.json` plus `initial-condition-plan.npz` under the ignored `artifacts/day22-dataset-design/` directory. It refuses to overwrite either file. See the [dataset card](docs/dataset-card.md), [Day 22 specification](docs/spec.md#28-day-22-dataset-contract-and-split-design), and their [Korean dataset card](docs/dataset-card.ko.md) and [specification](docs/spec.ko.md#22일차-데이터셋-규약과-split-설계).
+
+## Day 23 large-scale easy Teacher generation
+
+Day 23 reuses the timeout-isolated Teacher worker for the exact 800-condition train plan from Day 22. Each case first uses the previous accepted control sequence as a dynamically reintegrated warm start and retries once from a fresh PID trajectory when necessary. Progress output records elapsed wall time, throughput, and whole-run ETA every 10 cases. The post-solve filter rejects duplicate identities, nonfinite values, malformed state-action alignment or time grids, failed replay, terminal violations, state-bound violations, and actuator violations before packing.
+
+~~~bash
+python scripts/generate_offline_dataset.py
+~~~
+
+All 800 planned cases were executed in `947.487 s`. The solver and independent replay accepted 797 trajectories, or `99.625%`. Four cases were retried; one retry recovered and three cases remained rejected because the fine-step replay exceeded the tilt bound. There were no timeouts and no additional duplicate, NaN, structure, or constraint-filter rejections among solver successes. The completion gate required all 800 cases to be executed, at least 500 verified trajectories, and a valid packed shard; all checks passed.
+
+The accepted shard contains 80,497 state rows and 79,700 aligned action rows. Its canonical SHA-256 is `04c0f2c0ff3c2e77a28276b37cd8005d2274dad041fbca2e145cd0aec9fe0876`. The manifest and shard remain under the Git-ignored `artifacts/day23-easy-dataset/` directory. Day 24 will generate the wider and harder ranges, inspect coverage, and create the final offline dataset version. See the [Day 23 specification](docs/spec.md#29-day-23-large-scale-easy-teacher-generation) or [Korean version](docs/spec.ko.md#23일차-대규모-쉬운-teacher-궤적-생성).
 
 ## Frozen Week 2 PID baseline
 
@@ -400,7 +412,7 @@ The tracked repository contains only source code, reproducible configuration, te
 - Week 1: simulator, event handling, logging, replay, and numerical verification - complete
 - Week 2: suicide-burn and frozen PID baseline - complete
 - Week 3: constrained optimal-control teacher - full planar solver, numerical tuning, 100-case pipeline, validation, comparison, and protocol freeze complete
-- Week 4: dataset contract and split design complete; trajectory generation and Behavior Cloning next
+- Week 4: dataset contract and 797-trajectory easy train shard complete; hard-range generation and Behavior Cloning next
 - Week 5: DAgger closed-loop improvement
 - Week 6: disturbances and Monte Carlo evaluation
 - Week 7: report, comparison visuals, and interactive demo

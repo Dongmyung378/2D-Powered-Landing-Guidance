@@ -334,6 +334,19 @@ offline_dataset:
         omega_deg_s: [-5.0, 5.0]
         mass_kg: [900.0, 960.0]
 
+offline_dataset_generation:
+  schema_version: 1
+  split: train
+  minimum_validated_trajectories: 500
+  runner: sequential_subprocess
+  attempt_timeout_s: 30.0
+  max_retries: 1
+  warm_start: previous_success
+  retry_initial_guess: pid
+  worker_restart_after_attempts: 25
+  replay_dt_s: 0.01
+  progress_interval: 10
+
 baseline_protocol:
   id: pid-baseline-v1
   controller: integrated-pid

@@ -88,6 +88,23 @@ class TeacherPipelineResult:
         return len(self.solutions)
 
 
+@dataclass(frozen=True, slots=True)
+class TeacherSolveBatchResult:
+    """Reusable solver-batch result for caller-provided initial conditions."""
+
+    intervals: int
+    batch_sha256: str
+    initial_states: NDArray[np.float64]
+    cases: tuple[dict[str, Any], ...]
+    successful_case_indices: tuple[int, ...]
+    solutions: tuple[PlanarLandingResult, ...]
+    wall_time_s: float
+
+    @property
+    def successful_cases(self) -> int:
+        return len(self.solutions)
+
+
 def initial_guess_plan(
     previous_success_available: bool,
     max_retries: int,
@@ -358,21 +375,40 @@ def _success_metadata(
     }
 
 
-def run_teacher_pipeline(
+def solve_teacher_batch(
     config: dict[str, Any],
+    initial_states: NDArray[np.float64],
     *,
+    attempt_timeout_s: float,
+    max_retries: int,
+    retry_initial_guess: str,
+    worker_restart_after_attempts: int,
+    replay_dt_s: float,
     progress: ProgressCallback | None = None,
-) -> TeacherPipelineResult:
-    """Solve a reproducible batch with enforced timeout, retry, and warm-start policies."""
-    settings = TeacherPipelineSettings.from_config(config)
-    if settings.sampler != INITIAL_CONDITION_SAMPLER:
-        raise ValueError(f"unsupported initial-condition sampler: {settings.sampler}")
-    initial_states = sample_integrated_initial_states(config, settings.episodes, settings.seed)
-    initial_states.flags.writeable = False
-    batch_sha256 = initial_condition_sha256(initial_states)
+) -> TeacherSolveBatchResult:
+    """Solve caller-provided states with timeout, warm-start, retry, and replay checks."""
+    validate_config(config)
+    states = np.array(initial_states, dtype=np.float64, copy=True)
+    if states.ndim != 2 or states.shape[1] != 7 or len(states) == 0:
+        raise ValueError("initial_states must have shape (episodes, 7)")
+    if not np.all(np.isfinite(states)):
+        raise ValueError("initial_states must contain only finite values")
+    if not np.isfinite(attempt_timeout_s) or attempt_timeout_s <= 0.0:
+        raise ValueError("attempt_timeout_s must be positive and finite")
+    if not isinstance(worker_restart_after_attempts, int) or isinstance(
+        worker_restart_after_attempts, bool
+    ):
+        raise ValueError("worker_restart_after_attempts must be a positive integer")
+    if worker_restart_after_attempts <= 0:
+        raise ValueError("worker_restart_after_attempts must be a positive integer")
+    if not np.isfinite(replay_dt_s) or replay_dt_s <= 0.0:
+        raise ValueError("replay_dt_s must be positive and finite")
+    initial_guess_plan(False, max_retries, retry_initial_guess)
+    states.flags.writeable = False
+    batch_sha256 = initial_condition_sha256(states)
     study_settings = StudySettings.from_config(config)
     tolerances = np.asarray(study_settings.final_state_tolerances, dtype=np.float64)
-    worker = _SequentialSolverWorker(config, settings.worker_restart_after_attempts)
+    worker = _SequentialSolverWorker(config, worker_restart_after_attempts)
     cases: list[dict[str, Any]] = []
     solutions: list[PlanarLandingResult] = []
     successful_case_indices: list[int] = []
@@ -380,19 +416,19 @@ def run_teacher_pipeline(
     pipeline_started = perf_counter()
 
     try:
-        for case_index, initial_state in enumerate(initial_states):
+        for case_index, initial_state in enumerate(states):
             attempts: list[dict[str, Any]] = []
             accepted: tuple[PlanarLandingResult, dict[str, Any]] | None = None
             plan = initial_guess_plan(
                 previous_success is not None,
-                settings.max_retries,
-                settings.retry_initial_guess,
+                max_retries,
+                retry_initial_guess,
             )
             for attempt_index, guess_source in enumerate(plan):
                 request: dict[str, Any] = {
                     "initial_state": initial_state,
                     "guess_source": guess_source,
-                    "replay_dt_s": settings.replay_dt_s,
+                    "replay_dt_s": replay_dt_s,
                 }
                 if guess_source == "previous_success" and previous_success is not None:
                     warm_case_index, warm_controls, warm_duration = previous_success
@@ -403,7 +439,7 @@ def run_teacher_pipeline(
                             "warm_duration_s": warm_duration,
                         }
                     )
-                response = worker.solve(request, settings.attempt_timeout_s)
+                response = worker.solve(request, attempt_timeout_s)
                 attempt = _attempt_metadata(attempt_index, guess_source, response)
                 if response["kind"] == "solved":
                     result = response["result"]
@@ -434,19 +470,50 @@ def run_teacher_pipeline(
                 case["failure"] = attempts[-1] if attempts else {"status": "not_attempted"}
             cases.append(case)
             if progress is not None:
-                progress(case_index + 1, settings.episodes, case)
+                progress(case_index + 1, len(states), case)
     finally:
         worker.close()
 
-    return TeacherPipelineResult(
-        settings=settings,
+    return TeacherSolveBatchResult(
         intervals=int(config["optimal_control"]["intervals"]),
         batch_sha256=batch_sha256,
-        initial_states=initial_states,
+        initial_states=states,
         cases=tuple(cases),
         successful_case_indices=tuple(successful_case_indices),
         solutions=tuple(solutions),
         wall_time_s=perf_counter() - pipeline_started,
+    )
+
+
+def run_teacher_pipeline(
+    config: dict[str, Any],
+    *,
+    progress: ProgressCallback | None = None,
+) -> TeacherPipelineResult:
+    """Solve the configured Day 20 batch with its frozen execution policy."""
+    settings = TeacherPipelineSettings.from_config(config)
+    if settings.sampler != INITIAL_CONDITION_SAMPLER:
+        raise ValueError(f"unsupported initial-condition sampler: {settings.sampler}")
+    initial_states = sample_integrated_initial_states(config, settings.episodes, settings.seed)
+    batch = solve_teacher_batch(
+        config,
+        initial_states,
+        attempt_timeout_s=settings.attempt_timeout_s,
+        max_retries=settings.max_retries,
+        retry_initial_guess=settings.retry_initial_guess,
+        worker_restart_after_attempts=settings.worker_restart_after_attempts,
+        replay_dt_s=settings.replay_dt_s,
+        progress=progress,
+    )
+    return TeacherPipelineResult(
+        settings=settings,
+        intervals=batch.intervals,
+        batch_sha256=batch.batch_sha256,
+        initial_states=batch.initial_states,
+        cases=batch.cases,
+        successful_case_indices=batch.successful_case_indices,
+        solutions=batch.solutions,
+        wall_time_s=batch.wall_time_s,
     )
 
 

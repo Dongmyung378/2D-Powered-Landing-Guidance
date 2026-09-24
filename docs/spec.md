@@ -636,3 +636,23 @@ python scripts/design_offline_dataset.py
 ~~~
 
 The command writes a JSON contract report and compressed NPZ containing the six deterministic initial-state and ID arrays. It refuses to overwrite either output. The Day 22 completion gate checks the full state, action, trajectory, initial-condition, and solver-quality schema; all split ranges; absence of trajectory leakage; train-only normalization; and a strictly harder test range. Generated files remain under the Git-ignored `artifacts/day22-dataset-design/` directory. The human-readable [dataset card](dataset-card.md) and its [Korean version](dataset-card.ko.md) document intended use and limitations.
+
+## 29. Day 23 large-scale easy Teacher generation
+
+Day 23 solves the complete 800-condition easy train plan from Day 22. The existing timeout-isolated sequential worker now exposes a reusable caller-provided batch interface, while the frozen Day 20 entry point retains its original sampler and policy. The Day 23 policy permits 30 seconds per attempt, recycles the worker after 25 attempts, uses the previous accepted control sequence as the next warm start, and retries once from a new PID trajectory. Every control warm start is reintegrated from the current initial state before optimization.
+
+The generator reports elapsed wall time, average throughput, and whole-run ETA after the first case and every 10 cases thereafter. Timing samples remain descriptive measurements from the development machine. They are stored in the manifest and are not performance guarantees. The output writer first creates temporary files and atomically replaces both final destinations. It refuses to run if either destination already exists.
+
+Solver success does not directly imply admission to the training shard. Each candidate is filtered for duplicate split-independent initial-condition and trajectory IDs; NaN or infinite state, action, time, duration, and quality values; fixed-mesh shape and state-action count errors; nonincreasing or inconsistent time grids; initial-state mismatch; actuator bounds; Stage B hard and terminal residuals; and independently recomputed terminal, altitude, propellant, tilt, and angular-rate limits. The packed shard is then validated again for its exact field set and dtype, offsets, finite values, unique IDs, `T+1` state to `T` action relation, per-trajectory time grids, reconstructed initial-condition IDs, and accepted-only solver/replay flags.
+
+The shard uses the Day 22 `packed_npz_v1` contract. It contains 797 trajectory and initial-condition IDs, source indices, 798 state and action offsets, 80,497 state/time rows, 79,700 action rows, duration and solver-iteration values, hard and terminal residuals, replay error ratios, fuel use, and attempt counts. A canonical array digest includes each sorted field name, little-endian dtype, shape, and raw array bytes, making it independent of NPZ ZIP timestamps.
+
+~~~bash
+python scripts/generate_offline_dataset.py
+~~~
+
+All 800 planned cases were executed. The run accepted 797 trajectories and rejected three after both the previous-success and PID attempts exceeded the replay tilt bound. Case 637 failed its first optimization attempt but passed its PID retry, so four cases were retried in total. There were no timeouts and no post-solver filter rejections. Wall time was `947.487 s`, or `1.184 s` per executed case, and acceptance was `99.625%`.
+
+Accepted fuel use averaged `26.594 kg` with a `24.785-28.704 kg` range. Duration averaged `5.003 s` with a `5.000-5.230 s` range. The largest stored Stage B hard residual was `6.758e-9`, the largest terminal residual was `1.770e-6`, and the largest fine-replay state error was `0.002351` of its state-specific tolerance. The shard canonical SHA-256 is `04c0f2c0ff3c2e77a28276b37cd8005d2274dad041fbca2e145cd0aec9fe0876`.
+
+The completion gate requires the entire planned split to be executed, at least 500 trajectories to pass all filters, and the final packed shard to pass every structural and quality check. All checks passed. `train-manifest.json` and `train-trajectories.npz` remain under the Git-ignored `artifacts/day23-easy-dataset/` directory. This is the easy train shard, not the final frozen offline dataset. Day 24 adds wider and harder conditions, visualizes coverage, and fills underrepresented regions before finalization.

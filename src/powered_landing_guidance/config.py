@@ -785,6 +785,52 @@ def validate_config(config: Config) -> None:
         if not all(harder_test_checks):
             raise ConfigError("offline_dataset test ranges must be strictly harder than train")
 
+        generation = _mapping(config, "offline_dataset_generation")
+        if set(generation) != {
+            "schema_version",
+            "split",
+            "minimum_validated_trajectories",
+            "runner",
+            "attempt_timeout_s",
+            "max_retries",
+            "warm_start",
+            "retry_initial_guess",
+            "worker_restart_after_attempts",
+            "replay_dt_s",
+            "progress_interval",
+        }:
+            raise ConfigError("offline_dataset_generation keys are invalid")
+        if generation.get("schema_version") != 1:
+            raise ConfigError("offline_dataset_generation.schema_version must be 1")
+        generation_split = generation.get("split")
+        if generation_split != "train":
+            raise ConfigError("offline_dataset_generation split must be 'train' on Day 23")
+        minimum_validated = _positive_integer(generation, "minimum_validated_trajectories")
+        planned_episodes = int(splits[generation_split]["episodes"])
+        if minimum_validated > planned_episodes:
+            raise ConfigError(
+                "offline_dataset_generation minimum cannot exceed planned split episodes"
+            )
+        if generation.get("runner") != "sequential_subprocess":
+            raise ConfigError("offline_dataset_generation runner is invalid")
+        _positive(generation, "attempt_timeout_s")
+        _nonnegative_integer(generation, "max_retries")
+        if generation.get("warm_start") != "previous_success":
+            raise ConfigError("offline_dataset_generation warm_start must be 'previous_success'")
+        if generation.get("retry_initial_guess") != "pid":
+            raise ConfigError("offline_dataset_generation retry_initial_guess must be 'pid'")
+        _positive_integer(generation, "worker_restart_after_attempts")
+        generation_replay_dt = _positive(generation, "replay_dt_s")
+        if generation_replay_dt >= dt:
+            raise ConfigError(
+                "offline_dataset_generation replay_dt_s must be below simulation.dt_s"
+            )
+        progress_interval = _positive_integer(generation, "progress_interval")
+        if progress_interval > planned_episodes:
+            raise ConfigError(
+                "offline_dataset_generation progress_interval cannot exceed planned episodes"
+            )
+
     baseline_protocol = config.get("baseline_protocol")
     if baseline_protocol is not None:
         if not isinstance(baseline_protocol, dict):

@@ -8,14 +8,14 @@
 
 | 항목 | 현재 상태 |
 |---|---|
-| 로드맵 | 4주차 데이터셋 규약·split 설계 완료(22일차) |
+| 로드맵 | 4주차 쉬운 split Teacher 생성 완료(23일차) |
 | 모델 | 가변 질량 평면 3자유도 |
 | 상태 | x, z, vx, vz, theta, omega, mass |
 | 제어 | throttle, gimbal angle |
 | 현재 제어기 | Suicide-burn, 수직 PID, 수평·자세 제어, 통합 착륙 제어 |
 | 실행 환경 | Python 3.12.7 |
 
-현재 저장소에는 검증된 시뮬레이션 환경, 두 가지 비학습 수직 착륙 기준선, 수평 위치·자세 직렬 제어기, 동결된 통합 PID 기준선, 재현 가능한 튜닝, 분리 외란 평가, 수직·이상 추력 방향 병진·전체 평면 3자유도 최적제어 문제가 구현되어 있습니다. 20일차에는 재현 가능한 초기조건 100개에서 압축 Teacher 궤적을 생성했고, 21일차에는 이를 독립 재적분하고 PID와 비교한 뒤 대표 애니메이션과 동결 protocol을 완성했습니다. 22일차에는 machine-readable 데이터셋 schema, trajectory 단위 leakage 방지 split, 의도적으로 더 어려운 test 범위와 train 전용 normalization 규약을 정의했습니다. Behavior Cloning, DAgger, 복합 불확실성과 더 넓은 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
+현재 저장소에는 검증된 시뮬레이션 환경, 동결 PID·최적제어 Teacher 기준선, 재현 가능한 튜닝, 분리 외란 평가와 전체 평면 3자유도 최적제어가 구현되어 있습니다. 22일차에는 offline dataset schema, trajectory 단위 leakage 방지 split, 더 어려운 test 범위와 train 전용 normalization 규약을 정의했습니다. 23일차에는 계획된 쉬운 train 초기조건 800개를 모두 실행하고 검증된 Teacher trajectory 797개를 packed train shard에 저장했습니다. 어려운 범위 생성, coverage 보강, Behavior Cloning, DAgger, 복합 불확실성과 더 넓은 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
 
 ## 최적제어 Teacher 문제 정식화
 
@@ -102,6 +102,18 @@ python scripts/design_offline_dataset.py
 ~~~
 
 명령은 다섯 완료 검사를 모두 수행하고 Git에서 제외되는 `artifacts/day22-dataset-design/`에 `dataset-design.json`과 `initial-condition-plan.npz`를 생성합니다. 기존 파일은 덮어쓰지 않습니다. 자세한 내용은 [한국어 데이터셋 카드](docs/dataset-card.ko.md), [22일차 기술 명세](docs/spec.ko.md#22일차-데이터셋-규약과-split-설계), [영문 데이터셋 카드](docs/dataset-card.md)와 [영문 명세](docs/spec.md#28-day-22-dataset-contract-and-split-design)에서 확인할 수 있습니다.
+
+## 23일차 대규모 쉬운 Teacher 궤적 생성
+
+23일차에는 22일차에 고정한 train 초기조건 800개를 timeout 격리 Teacher worker로 처리합니다. 각 case는 직전 채택 제어열을 새 초기상태에서 재적분한 warm start를 먼저 사용하고, 문제가 있으면 새 PID trajectory로 한 번 자동 재시도합니다. 10개마다 경과시간, 처리속도와 전체 실행 ETA를 측정합니다. Solver 이후 필터는 중복 ID, NaN·무한값, 잘못된 상태-action 정렬과 시간축, 재적분 실패, 종단·상태·구동기 제약 위반을 검사한 뒤 통과 trajectory만 묶습니다.
+
+~~~bash
+python scripts/generate_offline_dataset.py
+~~~
+
+계획된 800개를 모두 `947.487 s`에 실행했습니다. Solver와 독립 재적분을 통과한 trajectory는 797개로 성공률은 `99.625%`입니다. 4개 case가 재시도됐고 그중 1개는 복구됐으며, 3개는 세밀한 재적분에서 기울기 제한을 넘어서 제외됐습니다. Timeout은 0건이고 solver 성공 trajectory 중 중복, NaN, 구조 또는 제약 필터 추가 탈락도 0건입니다. 전체 800개 실행, 검증 trajectory 최소 500개와 packed shard 무결성을 요구하는 완료 gate는 모두 통과했습니다.
+
+채택 shard에는 상태 row 80,497개와 정렬된 action row 79,700개가 있습니다. Canonical SHA-256은 `04c0f2c0ff3c2e77a28276b37cd8005d2274dad041fbca2e145cd0aec9fe0876`입니다. Manifest와 shard는 Git에서 제외되는 `artifacts/day23-easy-dataset/`에 보관합니다. 24일차에는 더 넓고 어려운 범위를 생성하고 coverage를 확인한 뒤 최종 offline dataset version을 만듭니다. 자세한 내용은 [23일차 기술 명세](docs/spec.ko.md#23일차-대규모-쉬운-teacher-궤적-생성) 또는 [영문 명세](docs/spec.md#29-day-23-large-scale-easy-teacher-generation)에서 확인할 수 있습니다.
 
 ## 동결된 2주차 PID 기준선
 
@@ -400,7 +412,7 @@ Git에 포함되는 저장소에는 소스 코드, 재현 가능한 설정, 기�
 - 1주차: 시뮬레이터, 사건 처리, 기록, 재생과 수치 검증 - 완료
 - 2주차: suicide-burn과 동결 PID 기준선 - 완료
 - 3주차: 제약 최적제어 Teacher - 전체 평면 solver, 수치 튜닝, 100-case pipeline, 검증, 비교와 protocol 동결 완료
-- 4주차: 데이터셋 규약·split 설계 완료, 궤적 생성과 Behavior Cloning 진행 예정
+- 4주차: 데이터셋 규약과 쉬운 train trajectory 797개 완료, 어려운 범위 생성과 Behavior Cloning 진행 예정
 - 5주차: DAgger 폐루프 개선
 - 6주차: 외란과 Monte Carlo 평가
 - 7주차: 보고서, 비교 시각화와 조작 화면

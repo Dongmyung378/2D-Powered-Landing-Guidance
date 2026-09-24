@@ -38,6 +38,13 @@ from powered_landing_guidance.offline_dataset import (
     sample_split_initial_states,
     validate_split_integrity,
 )
+from powered_landing_guidance.offline_dataset_generation import (
+    OfflineGenerationSettings,
+    build_offline_generation_report,
+    generate_easy_teacher_trajectories,
+    packed_shard_sha256,
+    validate_packed_trajectory_shard,
+)
 from powered_landing_guidance.optimal_control import (
     LandingOptimalControlProblem,
     ObjectiveScales,
@@ -56,6 +63,7 @@ __all__ = [
     "INITIAL_CONDITION_SAMPLER",
     "LandingOptimalControlProblem",
     "ObjectiveTerms",
+    "OfflineGenerationSettings",
     "ObjectiveScales",
     "State",
     "SuicideBurnController",
@@ -64,22 +72,26 @@ __all__ = [
     "VerticalVelocityProfile",
     "classify_ignition_timing",
     "build_dataset_design",
+    "build_offline_generation_report",
     "compute_training_normalization_statistics",
     "dataset_configuration_sha256",
     "estimate_suicide_burn",
     "estimate_variable_mass_suicide_burn",
     "frozen_baseline_initial_states",
     "frozen_teacher_initial_states",
+    "generate_easy_teacher_trajectories",
     "harder_test_analysis",
     "initial_condition_sha256",
     "initial_condition_id",
     "integrated_controller_sha256",
     "load_config",
+    "packed_shard_sha256",
     "sample_integrated_initial_states",
     "sample_split_initial_states",
     "teacher_configuration_sha256",
     "validate_split_integrity",
     "validate_config",
+    "validate_packed_trajectory_shard",
 ]
 
 __version__ = "0.1.0"

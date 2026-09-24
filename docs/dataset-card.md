@@ -4,7 +4,7 @@
 
 ## Status and purpose
 
-`planar-bc-v1` is the planned offline dataset for training and evaluating a Behavior Cloning policy for the project's seven-state planar powered-landing problem. Day 22 defines the schema, deterministic initial-condition plan, split boundaries, leakage checks, and normalization contract. It does not claim that the final training trajectories already exist. Days 23 and 24 will solve, filter, pack, and freeze those trajectories.
+`planar-bc-v1` is the offline dataset for training and evaluating a Behavior Cloning policy for the project's seven-state planar powered-landing problem. Day 22 defined the schema, deterministic initial-condition plan, split boundaries, leakage checks, and normalization contract. Day 23 executed the complete easy train plan and produced a verified 797-trajectory training shard. Day 24 will add the wider and harder cases, evaluate coverage, and freeze the final dataset version.
 
 The intended supervised mapping is one nonterminal state to the optimal-control action applied over the following interval. The terminal state has no action target. The frozen `planar-teacher-v1` solver is the only accepted label source for this dataset version.
 
@@ -82,13 +82,15 @@ normalized = (value - train_mean) / max(train_population_std, 1e-6)
 
 Statistics are accumulated and stored as float64. Each state and action field records count, mean, population standard deviation, applied scale, minimum, and maximum. Angles remain in radians. At inference, the state is normalized, the predicted action is denormalized, and the physical actuator limits are applied. Terminal states are excluded because they do not have an action label.
 
-The current Day 22 artifacts define the statistics schema but do not publish final numeric values. Final values can only be computed after Days 23 and 24 finish the accepted train shard.
+The current Day 23 train shard provides 79,700 aligned nonterminal pairs, but the numeric statistics remain provisional until Day 24 completes coverage analysis and any additional train generation.
 
 ## Quality gates
 
 A trajectory is eligible for a training shard only when both optimization stages meet their configured tolerances and a fresh simulator replay passes final-state agreement, landing constraints, altitude, propellant reserve, tilt, angular rate, throttle, and gimbal checks. NaN or infinite values, malformed offsets, duplicate IDs, nonmonotonic time, state-action count mismatches, and failed replay records are rejected.
 
 The dataset manifest reports generated, accepted, retried, timed-out, failed, and filtered counts separately. A high accepted count must not hide optimization failures.
+
+The Day 23 run executed all 800 easy train conditions and accepted 797 trajectories. Four cases were retried; one recovered and three were excluded after fine-step replay exceeded the tilt limit. No accepted solver result was later rejected for duplicate identity, nonfinite data, malformed structure, or another constraint failure. The packed shard passed all dtype, offset, finite-value, uniqueness, time-grid, identity, and accepted-only checks.
 
 ## Known limitations
 
@@ -103,6 +105,7 @@ The dataset manifest reports generated, accepted, retried, timed-out, failed, an
 
 ~~~bash
 python scripts/design_offline_dataset.py
+python scripts/generate_offline_dataset.py
 ~~~
 
-The command validates the full contract and writes `dataset-design.json` plus `initial-condition-plan.npz` under the ignored `artifacts/day22-dataset-design/` directory. It refuses to overwrite either file. The generated plan is an input to Days 23 and 24, not the final offline dataset.
+The first command writes the Day 22 plan under `artifacts/day22-dataset-design/`. The second writes `train-manifest.json` and `train-trajectories.npz` under `artifacts/day23-easy-dataset/`. Both directories are ignored by Git, and neither command overwrites existing outputs. The current train-shard canonical SHA-256 is `04c0f2c0ff3c2e77a28276b37cd8005d2274dad041fbca2e145cd0aec9fe0876`.

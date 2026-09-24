@@ -639,3 +639,23 @@ python scripts/design_offline_dataset.py
 ~~~
 
 명령은 JSON 규약 보고서와 결정적인 초기상태·ID 배열 6개를 담은 압축 NPZ를 생성하며 기존 결과를 덮어쓰지 않습니다. 22일차 완료 gate는 상태, action, trajectory, initial condition과 solver 품질 schema, 세 split 범위, trajectory leakage 부재, train 전용 normalization과 엄격히 더 어려운 test 범위를 검사합니다. 생성 파일은 Git에서 제외되는 `artifacts/day22-dataset-design/`에 둡니다. 사용 목적과 한계는 [한국어 데이터셋 카드](dataset-card.ko.md)와 [영문 데이터셋 카드](dataset-card.md)에 정리합니다.
+
+## 23일차 대규모 쉬운 Teacher 궤적 생성
+
+23일차에는 22일차의 쉬운 train 초기조건 800개 전체를 풉니다. 기존 timeout 격리 순차 worker에 호출자가 초기조건을 전달할 수 있는 재사용 batch interface를 추가하되, 동결된 20일차 실행 명령의 sampler와 정책은 유지합니다. 23일차 정책은 시도당 30초 제한, 25회마다 worker 교체, 직전 채택 제어열 warm start와 새 PID trajectory 재시도 1회를 사용합니다. 모든 제어 warm start는 현재 초기상태에서 다시 적분한 뒤 최적화에 전달합니다.
+
+Generator는 첫 case와 이후 10개마다 경과시간, 평균 처리속도와 전체 실행 ETA를 출력합니다. 시간값은 개발 장비에서 측정한 설명용 값이며 성능 보장이 아닙니다. 측정 sample은 manifest에 저장합니다. 출력은 임시 파일을 만든 뒤 최종 경로로 원자적으로 교체하며, 두 결과 중 하나라도 이미 있으면 실행을 거부합니다.
+
+Solver 성공만으로 train shard에 들어가지는 않습니다. 각 후보는 split 독립 initial-condition·trajectory ID 중복, 상태·action·시간·종료시간·품질값의 NaN 또는 무한값, fixed-mesh shape와 상태-action 개수 오류, 증가하지 않거나 종료시간과 맞지 않는 시간축, 초기상태 불일치, 구동기 경계, B단계 hard·terminal 잔차와 독립 계산한 종단·고도·추진제·기울기·각속도 제한을 검사합니다. Packed shard도 정확한 field와 dtype, offset, 유한값, ID 고유성, 상태 `T+1`개와 action `T`개의 관계, trajectory별 시간축, 재구성한 initial-condition ID와 accepted-only solver·replay flag를 다시 검사합니다.
+
+Shard는 22일차 `packed_npz_v1` 규약을 사용합니다. Trajectory·initial-condition ID 797개, 원본 index, 상태·action offset 798개, 상태·시간 row 80,497개, action row 79,700개, 종료시간, solver 반복 수, hard·terminal 잔차, 재적분 오차비, 연료 사용량과 시도 수를 저장합니다. Canonical 배열 digest는 정렬한 field 이름, little-endian dtype, shape와 원시 byte를 사용하므로 NPZ ZIP timestamp에 의존하지 않습니다.
+
+~~~bash
+python scripts/generate_offline_dataset.py
+~~~
+
+계획된 800개를 모두 실행했습니다. 797개를 채택했고 3개는 previous-success와 PID 시도 모두 재적분 기울기 제한을 넘어 제외됐습니다. 637번 case는 첫 최적화가 실패했지만 PID 재시도에서 통과해 전체 재시도 case는 4개입니다. Timeout과 solver 성공 이후 filter 탈락은 0건입니다. 전체 시간은 `947.487 s`, 실행 case당 `1.184 s`, 채택률은 `99.625%`입니다.
+
+채택 궤적의 평균 연료 사용량은 `26.594 kg`, 범위는 `24.785-28.704 kg`입니다. 평균 종료시간은 `5.003 s`, 범위는 `5.000-5.230 s`입니다. 저장된 B단계 최대 hard 잔차는 `6.758e-9`, 최대 terminal 잔차는 `1.770e-6`, 세밀한 재적분의 상태별 허용오차 대비 최대 오차는 `0.002351`입니다. Shard canonical SHA-256은 `04c0f2c0ff3c2e77a28276b37cd8005d2274dad041fbca2e145cd0aec9fe0876`입니다.
+
+완료 gate는 계획된 split 전체 실행, 모든 filter를 통과한 trajectory 최소 500개와 최종 packed shard의 모든 구조·품질 검사 통과를 요구합니다. 모든 검사가 통과했습니다. `train-manifest.json`과 `train-trajectories.npz`는 Git에서 제외되는 `artifacts/day23-easy-dataset/`에 보관합니다. 이는 쉬운 train shard이며 최종 동결 offline dataset은 아닙니다. 24일차에는 더 넓고 어려운 조건을 추가하고 coverage를 시각화한 뒤 부족한 구간을 보강합니다.

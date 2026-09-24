@@ -4,7 +4,7 @@
 
 ## 상태와 목적
 
-`planar-bc-v1`은 프로젝트의 7상태 평면 동력 착륙 문제에서 Behavior Cloning policy를 학습하고 평가하기 위한 offline dataset 계획입니다. 22일차에는 schema, 결정적 초기조건 계획, split 경계, leakage 검사와 normalization 규약을 정의합니다. 최종 학습 궤적이 이미 생성됐다는 의미는 아닙니다. 23-24일차에 궤적을 풀고, 필터링하고, 묶어서 최종 동결합니다.
+`planar-bc-v1`은 프로젝트의 7상태 평면 동력 착륙 문제에서 Behavior Cloning policy를 학습하고 평가하기 위한 offline dataset입니다. 22일차에는 schema, 결정적 초기조건 계획, split 경계, leakage 검사와 normalization 규약을 정의했습니다. 23일차에는 쉬운 train 계획 전체를 실행해 검증된 trajectory 797개의 학습 shard를 만들었습니다. 24일차에는 더 넓고 어려운 case를 추가하고 coverage를 평가한 뒤 최종 dataset version을 동결합니다.
 
 지도학습 mapping은 비종단 상태 하나에서 다음 구간에 적용할 최적제어 action을 예측하는 방식입니다. 종단 상태에는 action target이 없습니다. 이 dataset version은 동결된 `planar-teacher-v1` solver만 label 출처로 인정합니다.
 
@@ -82,13 +82,15 @@ normalized = (value - train_mean) / max(train_population_std, 1e-6)
 
 통계는 float64로 누적하고 저장합니다. 상태와 action의 각 field는 count, mean, population standard deviation, 실제 적용 scale, minimum과 maximum을 기록합니다. 각도는 rad를 유지합니다. 추론할 때 상태를 normalize하고, 예측 action을 denormalize한 다음 물리 구동기 제한을 적용합니다. 종단 상태는 action label이 없으므로 통계에서 제외합니다.
 
-현재 22일차 산출물은 통계 schema를 정의하지만 최종 수치값을 발표하지 않습니다. 최종값은 23-24일차에 채택된 train shard가 완성된 뒤에만 계산할 수 있습니다.
+현재 23일차 train shard에는 정렬된 비종단 pair 79,700개가 있지만, 수치 통계는 24일차 coverage 분석과 필요한 추가 train 생성이 끝날 때까지 잠정값으로 취급합니다.
 
 ## 품질 기준
 
 두 최적화 단계가 설정 허용오차를 충족하고 새 simulator 재적분이 최종 상태 일치, 착륙 제약, 고도, 추진제 여유, 기울기, 각속도, throttle과 gimbal 검사를 통과해야 학습 shard에 들어갈 수 있습니다. NaN·무한값, 잘못된 offset, 중복 ID, 감소하는 시간, 상태·action 개수 불일치와 재적분 실패 기록은 거부합니다.
 
 Dataset manifest는 생성, 채택, 재시도, timeout, 실패와 필터 제외 수를 각각 보고합니다. 많은 채택 건수로 최적화 실패를 숨기지 않습니다.
+
+23일차 실행은 쉬운 train 조건 800개를 모두 처리하고 trajectory 797개를 채택했습니다. 4개 case가 재시도됐고 1개는 복구됐으며, 3개는 세밀한 재적분에서 기울기 제한을 넘어 제외됐습니다. Solver를 통과한 결과 중 중복 ID, 비유한 값, 잘못된 구조 또는 다른 제약 문제로 추가 제외된 궤적은 없습니다. Packed shard는 dtype, offset, 유한값, 고유성, 시간축, ID 재구성과 accepted-only 검사를 모두 통과했습니다.
 
 ## 알려진 한계
 
@@ -103,6 +105,7 @@ Dataset manifest는 생성, 채택, 재시도, timeout, 실패와 필터 제외 
 
 ~~~bash
 python scripts/design_offline_dataset.py
+python scripts/generate_offline_dataset.py
 ~~~
 
-명령은 전체 규약을 검사하고 Git에서 제외되는 `artifacts/day22-dataset-design/`에 `dataset-design.json`과 `initial-condition-plan.npz`를 생성합니다. 두 파일 모두 덮어쓰지 않습니다. 생성 계획은 23-24일차의 입력이며 최종 offline dataset이 아닙니다.
+첫 명령은 `artifacts/day22-dataset-design/`에 22일차 계획을 생성합니다. 두 번째 명령은 `artifacts/day23-easy-dataset/`에 `train-manifest.json`과 `train-trajectories.npz`를 생성합니다. 두 폴더는 Git에서 제외되며 기존 결과를 덮어쓰지 않습니다. 현재 train shard의 canonical SHA-256은 `04c0f2c0ff3c2e77a28276b37cd8005d2274dad041fbca2e145cd0aec9fe0876`입니다.
