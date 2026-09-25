@@ -1,10 +1,10 @@
-# 평면 BC 데이터셋 카드 초안
+# 평면 BC 데이터셋 카드
 
 [English dataset card](dataset-card.md)
 
 ## 상태와 목적
 
-`planar-bc-v1`은 프로젝트의 7상태 평면 동력 착륙 문제에서 Behavior Cloning policy를 학습하고 평가하기 위한 offline dataset입니다. 22일차에는 schema, 결정적 초기조건 계획, split 경계, leakage 검사와 normalization 규약을 정의했습니다. 23일차에는 쉬운 train 계획 전체를 실행해 검증된 trajectory 797개의 학습 shard를 만들었습니다. 24일차에는 더 넓고 어려운 case를 추가하고 coverage를 평가한 뒤 최종 dataset version을 동결합니다.
+`planar-bc-v1-final`은 프로젝트의 7상태 평면 동력 착륙 문제에서 Behavior Cloning policy를 학습하고 평가하기 위한 최종 offline dataset입니다. Train 1,007개, IID validation 100개와 hard OOD test 191개로 구성됩니다. 24일차에 더 넓은 난이도 편향 train 보강, marginal coverage 복구, train 전용 normalization과 최종 물리 shard 검증을 완료했습니다.
 
 지도학습 mapping은 비종단 상태 하나에서 다음 구간에 적용할 최적제어 action을 예측하는 방식입니다. 종단 상태에는 action target이 없습니다. 이 dataset version은 동결된 `planar-teacher-v1` solver만 label 출처로 인정합니다.
 
@@ -44,27 +44,29 @@
 
 ## Split 설계
 
-각 split은 서로 다른 seed로 독립 생성합니다. Train과 validation은 같은 쉬운 범위를 사용하므로 validation은 IID 선택 성능을 측정합니다. Test는 수평 오차, 고도, 하강속도와 질량 범위가 train과 겹치지 않고, 수평속도·자세·각속도 범위도 더 넓은 hard OOD 조건입니다.
+각 split은 서로 다른 seed로 독립 생성합니다. Validation은 IID model 선택을 위해 원래 쉬운 범위를 유지합니다. 최종 train은 23일차 easy shard, 더 넓은 challenge 보강과 coverage 표적 보강을 합칩니다. Test는 수평 오차, 고도, 하강속도와 질량 범위가 확장 train과도 겹치지 않고, 수평속도·자세·각속도 범위가 더 넓은 hard OOD 조건입니다.
 
-| Field | Train·validation | Hard test |
-|---|---:|---:|
-| 수평 절대 오차 | 2-10 m | 12-20 m |
-| 고도 | 70-105 m | 110-140 m |
-| 수평속도 | -1.5-1.5 m/s | -4-4 m/s |
-| 수직속도 | -22에서 -15 m/s | -32에서 -24 m/s |
-| 자세 | -3-3 deg | -10-10 deg |
-| 각속도 | -1.5-1.5 deg/s | -5-5 deg/s |
-| 질량 | 970-1000 kg | 900-960 kg |
+| Field | Easy train·validation | Challenge train | Hard test |
+|---|---:|---:|---:|
+| 수평 절대 오차 | 2-10 m | 8-11 m | 12-20 m |
+| 고도 | 70-105 m | 90-108 m | 110-140 m |
+| 수평속도 | -1.5-1.5 m/s | -3-3 m/s | -4-4 m/s |
+| 수직속도 | -22에서 -15 m/s | -23.5에서 -20 m/s | -32에서 -24 m/s |
+| 자세 | -3-3 deg | -7-7 deg | -10-10 deg |
+| 각속도 | -1.5-1.5 deg/s | -3-3 deg/s | -5-5 deg/s |
+| 질량 | 970-1000 kg | 962-980 kg | 900-960 kg |
 
 | Split | 난이도 | 계획 궤적 수 | Seed |
 |---|---|---:|---:|
 | Train | easy nominal | 800 | 20260922 |
+| Train 보강 | 난이도 과표집 challenge | 후보 640개 중 160개 | 20260924 |
+| Train coverage | 부족 구간 적응 보강 | 최대 160개 | 20261024 |
 | Validation | easy IID | 100 | 20261022 |
 | Test | hard OOD | 200 | 20261122 |
 
 생성한 22일차 계획에는 split 내부 initial-condition ID 중복과 split 사이 겹침이 없습니다. 동결된 초기상태 SHA-256은 train `06e0203d6ffb9f26687ce6d734fb9010c969b9cb7d139bbef22a1231311937d1`, validation `ca45656bf8785808716bb522f201bfa72827f45af21d67e98c1485e2652070eb`, test `b244481859f99fd19c3ba44235fbd8f6afb4d31b04e59fa37e9d67c173420725`입니다.
 
-Hard split은 train 분포에서 무작위로 뽑은 꼬리 구간이 아닙니다. 모든 test case는 모든 train case보다 pad에서 멀고, 높고, 더 빠르게 하강하며, 사용할 수 있는 추진제가 적습니다. 나머지 운동 범위도 더 넓습니다.
+Hard split은 train 분포에서 무작위로 뽑은 꼬리 구간이 아닙니다. Train 범위를 확장한 뒤에도 모든 test case는 모든 train case보다 pad에서 멀고, 높고, 더 빠르게 하강하며, 사용할 수 있는 추진제가 적습니다. 나머지 운동 범위도 더 넓습니다.
 
 ## Leakage 방지
 
@@ -82,7 +84,7 @@ normalized = (value - train_mean) / max(train_population_std, 1e-6)
 
 통계는 float64로 누적하고 저장합니다. 상태와 action의 각 field는 count, mean, population standard deviation, 실제 적용 scale, minimum과 maximum을 기록합니다. 각도는 rad를 유지합니다. 추론할 때 상태를 normalize하고, 예측 action을 denormalize한 다음 물리 구동기 제한을 적용합니다. 종단 상태는 action label이 없으므로 통계에서 제외합니다.
 
-현재 23일차 train shard에는 정렬된 비종단 pair 79,700개가 있지만, 수치 통계는 24일차 coverage 분석과 필요한 추가 train 생성이 끝날 때까지 잠정값으로 취급합니다.
+최종 train shard에는 정렬된 비종단 pair 100,700개가 있습니다. `normalization.json`에 저장한 float64 통계가 `planar-bc-v1-final`의 최종 normalization 값입니다.
 
 ## 품질 기준
 
@@ -91,6 +93,8 @@ normalized = (value - train_mean) / max(train_population_std, 1e-6)
 Dataset manifest는 생성, 채택, 재시도, timeout, 실패와 필터 제외 수를 각각 보고합니다. 많은 채택 건수로 최적화 실패를 숨기지 않습니다.
 
 23일차 실행은 쉬운 train 조건 800개를 모두 처리하고 trajectory 797개를 채택했습니다. 4개 case가 재시도됐고 1개는 복구됐으며, 3개는 세밀한 재적분에서 기울기 제한을 넘어 제외됐습니다. Solver를 통과한 결과 중 중복 ID, 비유한 값, 잘못된 구조 또는 다른 제약 문제로 추가 제외된 궤적은 없습니다. Packed shard는 dtype, offset, 유한값, 고유성, 시간축, ID 재구성과 accepted-only 검사를 모두 통과했습니다.
+
+24일차에는 후보 640개 중 난이도 상위 120개를 포함한 challenge 160개를 선택했고 모두 채택했습니다. Coverage는 feature마다 8구간, 구간당 최소 30개를 사용했습니다. 한 번의 표적 보강에서 51개 중 50개가 채택되어 전체 marginal deficit이 51에서 0으로 줄었습니다. Validation은 100개 중 100개, hard OOD test는 200개 중 191개를 채택했습니다. Hard test 실패 9개와 coverage 실패 1개는 manifest에 보존하고 최종 shard에는 채택 궤적만 넣었습니다. Split 사이 initial-condition 중복, timeout과 solver 성공 후 filter 탈락은 없습니다.
 
 ## 알려진 한계
 
@@ -106,6 +110,7 @@ Dataset manifest는 생성, 채택, 재시도, timeout, 실패와 필터 제외 
 ~~~bash
 python scripts/design_offline_dataset.py
 python scripts/generate_offline_dataset.py
+python scripts/finalize_offline_dataset.py
 ~~~
 
-첫 명령은 `artifacts/day22-dataset-design/`에 22일차 계획을 생성합니다. 두 번째 명령은 `artifacts/day23-easy-dataset/`에 `train-manifest.json`과 `train-trajectories.npz`를 생성합니다. 두 폴더는 Git에서 제외되며 기존 결과를 덮어쓰지 않습니다. 현재 train shard의 canonical SHA-256은 `04c0f2c0ff3c2e77a28276b37cd8005d2274dad041fbca2e145cd0aec9fe0876`입니다.
+마지막 명령은 23일차 원본을 검증하고 `artifacts/day24-final-dataset/`에 version manifest, normalization 통계, 분포 PNG와 물리 shard 3개를 생성합니다. 생성 폴더는 Git에서 제외되며 명령은 기존 결과를 덮어쓰지 않습니다. 최종 shard SHA-256은 train `4161bc93b6753bdcc84cfb6eec6afe1c45bbf814b34525817a7ec24835691e0d`, validation `e77b561f63f5738ec6e09e24b9dbffe2e4712ff33e7d186d12b4945e2aaa618c`, test `6b67c7866e202b6719f07c733cd2cd82fdd3e2f1638c5bb33ec10ea3f3f5ba17`입니다.

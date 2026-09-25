@@ -1,10 +1,10 @@
-# Planar BC Dataset Card Draft
+# Planar BC Dataset Card
 
 [Korean dataset card](dataset-card.ko.md)
 
 ## Status and purpose
 
-`planar-bc-v1` is the offline dataset for training and evaluating a Behavior Cloning policy for the project's seven-state planar powered-landing problem. Day 22 defined the schema, deterministic initial-condition plan, split boundaries, leakage checks, and normalization contract. Day 23 executed the complete easy train plan and produced a verified 797-trajectory training shard. Day 24 will add the wider and harder cases, evaluate coverage, and freeze the final dataset version.
+`planar-bc-v1-final` is the finalized offline dataset for training and evaluating a Behavior Cloning policy for the project's seven-state planar powered-landing problem. It contains 1,007 train, 100 IID validation, and 191 hard OOD test trajectories. Day 24 added a wider hard-biased train supplement, repaired marginal coverage, fitted train-only normalization, and verified the final physical shards.
 
 The intended supervised mapping is one nonterminal state to the optimal-control action applied over the following interval. The terminal state has no action target. The frozen `planar-teacher-v1` solver is the only accepted label source for this dataset version.
 
@@ -44,27 +44,29 @@ The required arrays are `trajectory_ids`, `initial_condition_ids`, `source_case_
 
 ## Split design
 
-Splits are generated independently with distinct seeds. Train and validation use the same easy envelope so validation measures in-distribution selection performance. Test is a hard OOD envelope with disjoint horizontal offset, altitude, descent speed, and mass ranges plus wider horizontal-speed, attitude, and angular-rate ranges.
+Splits are generated independently with distinct seeds. Validation retains the original easy envelope for in-distribution model selection. Final train combines the easy Day 23 shard with a wider challenge supplement and targeted coverage repair. Test remains a harder OOD envelope with disjoint horizontal offset, altitude, descent speed, and mass ranges plus wider horizontal-speed, attitude, and angular-rate ranges.
 
-| Field | Train and validation | Hard test |
-|---|---:|---:|
-| Absolute horizontal offset | 2 to 10 m | 12 to 20 m |
-| Altitude | 70 to 105 m | 110 to 140 m |
-| Horizontal velocity | -1.5 to 1.5 m/s | -4 to 4 m/s |
-| Vertical velocity | -22 to -15 m/s | -32 to -24 m/s |
-| Attitude | -3 to 3 deg | -10 to 10 deg |
-| Angular rate | -1.5 to 1.5 deg/s | -5 to 5 deg/s |
-| Mass | 970 to 1000 kg | 900 to 960 kg |
+| Field | Easy train and validation | Challenge train | Hard test |
+|---|---:|---:|---:|
+| Absolute horizontal offset | 2 to 10 m | 8 to 11 m | 12 to 20 m |
+| Altitude | 70 to 105 m | 90 to 108 m | 110 to 140 m |
+| Horizontal velocity | -1.5 to 1.5 m/s | -3 to 3 m/s | -4 to 4 m/s |
+| Vertical velocity | -22 to -15 m/s | -23.5 to -20 m/s | -32 to -24 m/s |
+| Attitude | -3 to 3 deg | -7 to 7 deg | -10 to 10 deg |
+| Angular rate | -1.5 to 1.5 deg/s | -3 to 3 deg/s | -5 to 5 deg/s |
+| Mass | 970 to 1000 kg | 962 to 980 kg | 900 to 960 kg |
 
 | Split | Difficulty | Planned trajectories | Seed |
 |---|---|---:|---:|
 | Train | easy nominal | 800 | 20260922 |
+| Train supplement | difficulty-oversampled challenge | 160 from 640 candidates | 20260924 |
+| Train coverage | adaptive deficient-bin repair | at most 160 | 20261024 |
 | Validation | easy IID | 100 | 20261022 |
 | Test | hard OOD | 200 | 20261122 |
 
 The generated Day 22 plan contains no duplicate initial-condition IDs within a split and no overlap across splits. The frozen initial-state SHA-256 values are `06e0203d6ffb9f26687ce6d734fb9010c969b9cb7d139bbef22a1231311937d1` for train, `ca45656bf8785808716bb522f201bfa72827f45af21d67e98c1485e2652070eb` for validation, and `b244481859f99fd19c3ba44235fbd8f6afb4d31b04e59fa37e9d67c173420725` for test.
 
-The hard split is not a random tail of the training distribution. Every test case starts farther from the pad, higher, faster downward, and with less available propellant than every train case. Its remaining motion envelopes are also wider.
+The hard split is not a random tail of the training distribution. Even after the train envelope was expanded, every test case starts farther from the pad, higher, faster downward, and with less available propellant than every train case. Its remaining motion envelopes are also wider.
 
 ## Leakage prevention
 
@@ -82,7 +84,7 @@ normalized = (value - train_mean) / max(train_population_std, 1e-6)
 
 Statistics are accumulated and stored as float64. Each state and action field records count, mean, population standard deviation, applied scale, minimum, and maximum. Angles remain in radians. At inference, the state is normalized, the predicted action is denormalized, and the physical actuator limits are applied. Terminal states are excluded because they do not have an action label.
 
-The current Day 23 train shard provides 79,700 aligned nonterminal pairs, but the numeric statistics remain provisional until Day 24 completes coverage analysis and any additional train generation.
+The final train shard provides 100,700 aligned nonterminal pairs. `normalization.json` stores the resulting float64 statistics and is final for `planar-bc-v1-final`.
 
 ## Quality gates
 
@@ -91,6 +93,8 @@ A trajectory is eligible for a training shard only when both optimization stages
 The dataset manifest reports generated, accepted, retried, timed-out, failed, and filtered counts separately. A high accepted count must not hide optimization failures.
 
 The Day 23 run executed all 800 easy train conditions and accepted 797 trajectories. Four cases were retried; one recovered and three were excluded after fine-step replay exceeded the tilt limit. No accepted solver result was later rejected for duplicate identity, nonfinite data, malformed structure, or another constraint failure. The packed shard passed all dtype, offset, finite-value, uniqueness, time-grid, identity, and accepted-only checks.
+
+Day 24 selected 160 challenge cases from 640 candidates, including the 120 highest difficulty scores; all 160 were accepted. Coverage analysis used eight bins per feature and a minimum of 30 trajectories per bin. One targeted round accepted 50 of 51 cases and reduced the total marginal deficit from 51 to zero. Validation accepted 100 of 100 and hard OOD test accepted 191 of 200. The nine hard-test failures and the one coverage failure are retained in the manifest, while all final shards contain accepted trajectories only. There were no cross-split initial-condition overlaps, timeouts, or post-solver filter rejections.
 
 ## Known limitations
 
@@ -106,6 +110,7 @@ The Day 23 run executed all 800 easy train conditions and accepted 797 trajector
 ~~~bash
 python scripts/design_offline_dataset.py
 python scripts/generate_offline_dataset.py
+python scripts/finalize_offline_dataset.py
 ~~~
 
-The first command writes the Day 22 plan under `artifacts/day22-dataset-design/`. The second writes `train-manifest.json` and `train-trajectories.npz` under `artifacts/day23-easy-dataset/`. Both directories are ignored by Git, and neither command overwrites existing outputs. The current train-shard canonical SHA-256 is `04c0f2c0ff3c2e77a28276b37cd8005d2274dad041fbca2e145cd0aec9fe0876`.
+The final command verifies the Day 23 source and writes the version manifest, normalization statistics, distribution PNG, and three physical shards under `artifacts/day24-final-dataset/`. Generated directories are ignored by Git and commands refuse to overwrite outputs. Final shard SHA-256 values are train `4161bc93b6753bdcc84cfb6eec6afe1c45bbf814b34525817a7ec24835691e0d`, validation `e77b561f63f5738ec6e09e24b9dbffe2e4712ff33e7d186d12b4945e2aaa618c`, and test `6b67c7866e202b6719f07c733cd2cd82fdd3e2f1638c5bb33ec10ea3f3f5ba17`.

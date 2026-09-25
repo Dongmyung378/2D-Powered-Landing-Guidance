@@ -8,14 +8,14 @@ A reproducible 2D reusable-rocket powered-landing project that progresses from r
 
 | Item | Current status |
 |---|---|
-| Roadmap | Week 4 easy-split Teacher generation complete (Day 23) |
+| Roadmap | Week 4 final offline dataset complete (Day 24) |
 | Model | Planar 3-DoF with variable mass |
 | State | x, z, vx, vz, theta, omega, mass |
 | Action | throttle, gimbal angle |
 | Current controllers | Suicide-burn, vertical PID, horizontal-attitude, and integrated landing |
 | Runtime | Python 3.12.7 |
 
-The repository currently provides a tested simulation environment, frozen PID and optimal-control Teacher baselines, reproducible tuning, isolated-disturbance evaluation, and full planar 3-DoF optimal control. Day 22 defined the offline-dataset schema, leakage-safe trajectory splits, harder test envelope, and train-only normalization rules. Day 23 then executed all 800 planned easy training conditions and retained 797 verified Teacher trajectories in the packed training shard. Hard-range generation, coverage balancing, Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
+The repository currently provides a tested simulation environment, frozen PID and optimal-control Teacher baselines, reproducible tuning, isolated-disturbance evaluation, and full planar 3-DoF optimal control. Day 24 finalized a leakage-free offline dataset with 1,007 train, 100 validation, and 191 hard OOD test trajectories. Its wider hard-biased train supplement, coverage repair, train-only normalization, and distribution audit are complete. Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
 
 ## Optimal-control teacher formulation
 
@@ -114,6 +114,18 @@ python scripts/generate_offline_dataset.py
 All 800 planned cases were executed in `947.487 s`. The solver and independent replay accepted 797 trajectories, or `99.625%`. Four cases were retried; one retry recovered and three cases remained rejected because the fine-step replay exceeded the tilt bound. There were no timeouts and no additional duplicate, NaN, structure, or constraint-filter rejections among solver successes. The completion gate required all 800 cases to be executed, at least 500 verified trajectories, and a valid packed shard; all checks passed.
 
 The accepted shard contains 80,497 state rows and 79,700 aligned action rows. Its canonical SHA-256 is `04c0f2c0ff3c2e77a28276b37cd8005d2274dad041fbca2e145cd0aec9fe0876`. The manifest and shard remain under the Git-ignored `artifacts/day23-easy-dataset/` directory. Day 24 will generate the wider and harder ranges, inspect coverage, and create the final offline dataset version. See the [Day 23 specification](docs/spec.md#29-day-23-large-scale-easy-teacher-generation) or [Korean version](docs/spec.ko.md#23일차-대규모-쉬운-teacher-궤적-생성).
+
+## Day 24 final offline dataset
+
+Day 24 keeps the verified 797-trajectory Day 23 train shard and adds a wider challenge range that remains strictly easier than the frozen hard OOD test in horizontal distance, altitude, descent speed, and available propellant. It draws 640 deterministic candidates, scores joint difficulty from position, velocity, attitude, angular rate, altitude, and mass, then selects 120 of the hardest candidates plus 40 random candidates from the remainder. All 160 challenge trajectories passed solver and fine-replay validation.
+
+Coverage is measured over eight bins for absolute horizontal offset, altitude, horizontal and vertical speed, attitude, angular rate, and mass. The first analysis found 51 missing marginal counts relative to the required 30 trajectories per bin. One targeted generation round accepted 50 of 51 trajectories; random cross-feature placement also filled the failed target, leaving zero deficits and a worst-bin count of 30. The final train shard therefore contains 1,007 trajectories and 100,700 aligned state-action pairs.
+
+~~~bash
+python scripts/finalize_offline_dataset.py
+~~~
+
+The IID validation split accepted `100/100`. The hard OOD test accepted `191/200` (`95.5%`); all nine failures were preserved in the manifest after both warm-start and PID attempts failed fine replay, and no timeout or post-solver filter rejection occurred. The final shards have no duplicate initial-condition IDs within or across splits. Normalization is fitted only on the final train transitions. The command writes three packed shards, a versioned manifest, normalization statistics, and a distribution PNG under the Git-ignored `artifacts/day24-final-dataset/` directory and refuses to overwrite them. See the [Day 24 specification](docs/spec.md#30-day-24-final-offline-dataset) or [Korean version](docs/spec.ko.md#24일차-최종-offline-dataset).
 
 ## Frozen Week 2 PID baseline
 
@@ -412,7 +424,7 @@ The tracked repository contains only source code, reproducible configuration, te
 - Week 1: simulator, event handling, logging, replay, and numerical verification - complete
 - Week 2: suicide-burn and frozen PID baseline - complete
 - Week 3: constrained optimal-control teacher - full planar solver, numerical tuning, 100-case pipeline, validation, comparison, and protocol freeze complete
-- Week 4: dataset contract and 797-trajectory easy train shard complete; hard-range generation and Behavior Cloning next
+- Week 4: final 1,007/100/191 train/validation/hard-test offline dataset complete; Behavior Cloning next
 - Week 5: DAgger closed-loop improvement
 - Week 6: disturbances and Monte Carlo evaluation
 - Week 7: report, comparison visuals, and interactive demo

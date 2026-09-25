@@ -8,14 +8,14 @@
 
 | 항목 | 현재 상태 |
 |---|---|
-| 로드맵 | 4주차 쉬운 split Teacher 생성 완료(23일차) |
+| 로드맵 | 4주차 최종 offline dataset 완료(24일차) |
 | 모델 | 가변 질량 평면 3자유도 |
 | 상태 | x, z, vx, vz, theta, omega, mass |
 | 제어 | throttle, gimbal angle |
 | 현재 제어기 | Suicide-burn, 수직 PID, 수평·자세 제어, 통합 착륙 제어 |
 | 실행 환경 | Python 3.12.7 |
 
-현재 저장소에는 검증된 시뮬레이션 환경, 동결 PID·최적제어 Teacher 기준선, 재현 가능한 튜닝, 분리 외란 평가와 전체 평면 3자유도 최적제어가 구현되어 있습니다. 22일차에는 offline dataset schema, trajectory 단위 leakage 방지 split, 더 어려운 test 범위와 train 전용 normalization 규약을 정의했습니다. 23일차에는 계획된 쉬운 train 초기조건 800개를 모두 실행하고 검증된 Teacher trajectory 797개를 packed train shard에 저장했습니다. 어려운 범위 생성, coverage 보강, Behavior Cloning, DAgger, 복합 불확실성과 더 넓은 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
+현재 저장소에는 검증된 시뮬레이션 환경, 동결 PID·최적제어 Teacher 기준선, 재현 가능한 튜닝, 분리 외란 평가와 전체 평면 3자유도 최적제어가 구현되어 있습니다. 24일차에는 train 1,007개, validation 100개, hard OOD test 191개로 구성된 leakage 없는 최종 offline dataset을 완성했습니다. 더 넓은 난이도 편향 train 보강, coverage 복구, train 전용 normalization과 분포 검사까지 끝났습니다. Behavior Cloning, DAgger, 복합 불확실성과 더 넓은 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
 
 ## 최적제어 Teacher 문제 정식화
 
@@ -114,6 +114,18 @@ python scripts/generate_offline_dataset.py
 계획된 800개를 모두 `947.487 s`에 실행했습니다. Solver와 독립 재적분을 통과한 trajectory는 797개로 성공률은 `99.625%`입니다. 4개 case가 재시도됐고 그중 1개는 복구됐으며, 3개는 세밀한 재적분에서 기울기 제한을 넘어서 제외됐습니다. Timeout은 0건이고 solver 성공 trajectory 중 중복, NaN, 구조 또는 제약 필터 추가 탈락도 0건입니다. 전체 800개 실행, 검증 trajectory 최소 500개와 packed shard 무결성을 요구하는 완료 gate는 모두 통과했습니다.
 
 채택 shard에는 상태 row 80,497개와 정렬된 action row 79,700개가 있습니다. Canonical SHA-256은 `04c0f2c0ff3c2e77a28276b37cd8005d2274dad041fbca2e145cd0aec9fe0876`입니다. Manifest와 shard는 Git에서 제외되는 `artifacts/day23-easy-dataset/`에 보관합니다. 24일차에는 더 넓고 어려운 범위를 생성하고 coverage를 확인한 뒤 최종 offline dataset version을 만듭니다. 자세한 내용은 [23일차 기술 명세](docs/spec.ko.md#23일차-대규모-쉬운-teacher-궤적-생성) 또는 [영문 명세](docs/spec.md#29-day-23-large-scale-easy-teacher-generation)에서 확인할 수 있습니다.
+
+## 24일차 최종 offline dataset
+
+24일차에는 검증된 23일차 train trajectory 797개를 보존하고 더 넓은 challenge 범위를 추가했습니다. 이 범위는 기존 train보다 넓지만 수평거리, 고도, 하강속도와 사용 가능한 추진제 기준으로 동결 hard OOD test보다 명확히 쉽습니다. 결정적 후보 640개의 위치·속도·자세·각속도·고도·질량 난이도를 계산한 뒤 상위 120개와 나머지 중 무작위 40개를 선택했습니다. Challenge trajectory 160개는 모두 solver와 세밀한 재적분 검증을 통과했습니다.
+
+Coverage는 수평 절대거리, 고도, 수평·수직속도, 자세, 각속도와 질량을 각각 8구간으로 나누고 구간당 최소 30개를 요구합니다. 첫 분석에서 부족한 marginal count 51개를 확인했습니다. 부족 구간을 직접 겨냥한 한 번의 추가 생성에서 51개 중 50개가 채택됐고, 다른 상태 성분의 무작위 배치가 실패한 목표 구간도 채워 최종 deficit은 0개, 가장 적은 구간은 정확히 30개가 됐습니다. 최종 train shard는 trajectory 1,007개와 정렬된 상태-action pair 100,700개를 담습니다.
+
+~~~bash
+python scripts/finalize_offline_dataset.py
+~~~
+
+IID validation은 `100/100`, hard OOD test는 `191/200`(`95.5%`)이 채택됐습니다. Hard test 실패 9개는 warm-start와 PID 시도 모두 세밀한 재적분을 통과하지 못한 기록으로 manifest에 보존했습니다. Timeout과 solver 성공 후 filter 탈락은 없습니다. 세 최종 shard에는 split 내부 또는 split 사이 initial-condition ID 중복이 없고, normalization은 최종 train transition만 사용합니다. 명령은 Git에서 제외되는 `artifacts/day24-final-dataset/`에 packed shard 3개, version manifest, normalization 통계와 분포 PNG를 저장하며 기존 결과를 덮어쓰지 않습니다. 자세한 내용은 [24일차 기술 명세](docs/spec.ko.md#24일차-최종-offline-dataset) 또는 [영문 명세](docs/spec.md#30-day-24-final-offline-dataset)에서 확인할 수 있습니다.
 
 ## 동결된 2주차 PID 기준선
 
@@ -412,7 +424,7 @@ Git에 포함되는 저장소에는 소스 코드, 재현 가능한 설정, 기�
 - 1주차: 시뮬레이터, 사건 처리, 기록, 재생과 수치 검증 - 완료
 - 2주차: suicide-burn과 동결 PID 기준선 - 완료
 - 3주차: 제약 최적제어 Teacher - 전체 평면 solver, 수치 튜닝, 100-case pipeline, 검증, 비교와 protocol 동결 완료
-- 4주차: 데이터셋 규약과 쉬운 train trajectory 797개 완료, 어려운 범위 생성과 Behavior Cloning 진행 예정
+- 4주차: train/validation/hard-test 1,007/100/191개 최종 offline dataset 완료, Behavior Cloning 진행 예정
 - 5주차: DAgger 폐루프 개선
 - 6주차: 외란과 Monte Carlo 평가
 - 7주차: 보고서, 비교 시각화와 조작 화면

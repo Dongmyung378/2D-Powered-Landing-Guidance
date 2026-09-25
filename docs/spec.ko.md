@@ -659,3 +659,25 @@ python scripts/generate_offline_dataset.py
 채택 궤적의 평균 연료 사용량은 `26.594 kg`, 범위는 `24.785-28.704 kg`입니다. 평균 종료시간은 `5.003 s`, 범위는 `5.000-5.230 s`입니다. 저장된 B단계 최대 hard 잔차는 `6.758e-9`, 최대 terminal 잔차는 `1.770e-6`, 세밀한 재적분의 상태별 허용오차 대비 최대 오차는 `0.002351`입니다. Shard canonical SHA-256은 `04c0f2c0ff3c2e77a28276b37cd8005d2274dad041fbca2e145cd0aec9fe0876`입니다.
 
 완료 gate는 계획된 split 전체 실행, 모든 filter를 통과한 trajectory 최소 500개와 최종 packed shard의 모든 구조·품질 검사 통과를 요구합니다. 모든 검사가 통과했습니다. `train-manifest.json`과 `train-trajectories.npz`는 Git에서 제외되는 `artifacts/day23-easy-dataset/`에 보관합니다. 이는 쉬운 train shard이며 최종 동결 offline dataset은 아닙니다. 24일차에는 더 넓고 어려운 조건을 추가하고 coverage를 시각화한 뒤 부족한 구간을 보강합니다.
+
+## 24일차 최종 offline dataset
+
+24일차에는 검증된 23일차 원본 shard를 변경하지 않고 `planar-bc-v1-final`을 생성합니다. 생성 전에 23일차 manifest와 NPZ를 `allow_pickle=False`로 읽고 dataset 설정 digest, 완료 gate, packed schema, 재구성한 initial-condition ID와 canonical shard SHA-256을 확인합니다. 하나라도 다르면 새 solver process를 시작하기 전에 중단합니다.
+
+Challenge train 범위는 수평 절대거리 `8-11 m`, 고도 `90-108 m`, 수평속도 `-3-3 m/s`, 수직속도 `-23.5`에서 `-20 m/s`, 자세 `-7-7 deg`, 각속도 `-3-3 deg/s`, 질량 `962-980 kg`으로 easy 범위를 확장합니다. Hard OOD test는 수평거리, 고도, 하강속도와 질량이 확장 train과도 엄격히 분리되며 수평속도, 자세와 각속도 범위도 더 넓게 유지합니다.
+
+어려운 case 과표집은 seed `20260924`로 challenge 후보 640개를 먼저 만듭니다. 각 후보는 수평 절대거리, 고도, 수평속도 절대값, 하강속도, 자세 절대값, 각속도 절대값과 낮은 질량의 정규화 난이도 7개 평균을 받습니다. 점수가 높은 120개와 나머지 중 무작위 40개를 선택합니다. 후보 전체 평균 점수 `0.5010`이 선택 집합에서는 `0.6079`로 높아지며, 일부 무작위 표본을 남겨 분포 폭이 지나치게 좁아지는 것을 막습니다.
+
+Coverage는 easy와 challenge train 범위의 합집합에서 계산합니다. 수평 위치는 목표까지의 절대거리로 바꾸고 자세와 각속도는 degree로 바꾼 뒤 7개 상태 feature를 각각 고정 8구간으로 나눕니다. 모든 marginal 구간에 채택 train trajectory가 최소 30개 있어야 합니다. Challenge 생성 뒤 전체 deficit은 51개였습니다. 보강 sampler는 부족 feature를 번갈아 선택하고 하나의 목표 feature를 부족 구간 안에 고정하며 나머지는 최종 train 범위에서 표본화합니다. 중복 initial-condition ID는 제거하고 같은 Teacher 정책으로 풉니다. 각 round가 끝날 때 채택 trajectory만으로 coverage를 다시 계산하며 최대 추가 case는 160개, 최대 round는 3회입니다.
+
+실제 실행에서는 challenge 160개가 모두 채택됐습니다. Coverage 1차 보강은 51개 중 50개를 채택했습니다. 다른 feature의 무작위 배치가 실패 case가 목표로 한 구간도 채워 2차 보강은 필요하지 않았습니다. 최종 구간별 최소 count는 수평 절대거리 105, 고도 100, 수평속도 30, 수직속도 91, 자세 34, 각속도 31, 질량 76입니다. Coverage 검사 7개가 모두 통과했습니다.
+
+최종 train shard는 23일차 797개, challenge 160개와 coverage 50개를 합친 trajectory 1,007개이며 정렬된 비종단 상태-action pair 100,700개를 담습니다. IID validation은 `100/100`, hard OOD test는 `191/200`, 즉 `95.5%`를 채택했습니다. Hard test 실패 9개는 warm-start와 PID 시도 모두 세밀한 simulator 재적분에 실패했습니다. Timeout은 없고 solver 성공 결과가 중복, 비유한 값, 구조 또는 제약 filter에서 추가 제외된 사례도 없습니다.
+
+최종 shard 3개는 정확한 field, dtype, offset, 유한값, accepted-only, 시간축과 initial-condition identity 검사를 독립적으로 통과했습니다. 안정적인 ID 검사 결과 split 내부 중복과 train, validation, test 사이 겹침은 모두 0개입니다. Normalization 통계는 최종 train pair 100,700개만 사용하며 validation과 test 값은 fit에 들어가지 않습니다.
+
+~~~bash
+python scripts/finalize_offline_dataset.py
+~~~
+
+명령은 기존 결과를 덮어쓰지 않고 `artifacts/day24-final-dataset/`에 `dataset-manifest.json`, `normalization.json`, `dataset-distribution.png`와 split별 packed NPZ를 원자적으로 저장합니다. Canonical shard SHA-256은 train `4161bc93b6753bdcc84cfb6eec6afe1c45bbf814b34525817a7ec24835691e0d`, validation `e77b561f63f5738ec6e09e24b9dbffe2e4712ff33e7d186d12b4945e2aaa618c`, test `6b67c7866e202b6719f07c733cd2cd82fdd3e2f1638c5bb33ec10ea3f3f5ba17`입니다. 원본, 과표집, 난이도, coverage, 개수, shard, split integrity와 normalization 완료 검사가 모두 통과했습니다.

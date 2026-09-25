@@ -436,14 +436,24 @@ def packed_shard_sha256(arrays: dict[str, NDArray[Any]]) -> str:
     return digest.hexdigest()
 
 
-def generate_easy_teacher_trajectories(
+def generate_teacher_trajectories(
     config: dict[str, Any],
+    initial_states: NDArray[np.float64],
+    settings: OfflineGenerationSettings,
     *,
     progress: ProgressCallback | None = None,
 ) -> OfflineGenerationResult:
-    """Generate, filter, and pack the configured Day 23 easy training split."""
-    settings = OfflineGenerationSettings.from_config(config)
-    initial_states = sample_split_initial_states(config, settings.split)
+    """Generate, filter, and pack one caller-provided dataset split."""
+    validate_config(config)
+    states = np.asarray(initial_states, dtype=np.float64)
+    if states.ndim != 2 or states.shape[1] != 7 or len(states) == 0:
+        raise ValueError("initial_states must have shape (episodes, 7)")
+    if not np.all(np.isfinite(states)):
+        raise ValueError("initial_states must contain only finite values")
+    if settings.split not in config["offline_dataset"]["splits"]:
+        raise ValueError("settings split is not defined by offline_dataset")
+    if settings.minimum_validated_trajectories > len(states):
+        raise ValueError("minimum validated trajectories cannot exceed initial states")
     initial_ids = split_initial_condition_ids(initial_states)
     batch = solve_teacher_batch(
         config,
@@ -492,6 +502,22 @@ def generate_easy_teacher_trajectories(
         trajectory_ids=tuple(item[2] for item in accepted),
         rejections=tuple(rejections),
         arrays=arrays,
+    )
+
+
+def generate_easy_teacher_trajectories(
+    config: dict[str, Any],
+    *,
+    progress: ProgressCallback | None = None,
+) -> OfflineGenerationResult:
+    """Generate, filter, and pack the configured Day 23 easy training split."""
+    settings = OfflineGenerationSettings.from_config(config)
+    initial_states = sample_split_initial_states(config, settings.split)
+    return generate_teacher_trajectories(
+        config,
+        initial_states,
+        settings,
+        progress=progress,
     )
 
 

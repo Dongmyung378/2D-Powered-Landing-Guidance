@@ -349,3 +349,43 @@ offline_dataset_generation:
   worker_restart_after_attempts: 25
   replay_dt_s: 0.01
   progress_interval: 10
+
+offline_dataset_finalization:
+  schema_version: 1
+  id: planar-bc-v1-final
+  generation:
+    runner: sequential_subprocess
+    attempt_timeout_s: 30.0
+    max_retries: 1
+    warm_start: previous_success
+    retry_initial_guess: pid
+    worker_restart_after_attempts: 25
+    replay_dt_s: 0.01
+    progress_interval: 10
+  hard_oversampling:
+    sampler: difficulty_oversampled_v1
+    difficulty: expanded_train_challenge
+    episodes: 160
+    seed: 20260924
+    candidate_multiplier: 4
+    hardest_fraction: 0.75
+    score: normalized_mean_v1
+    ranges:
+      x_m: [-11.0, 11.0]
+      min_abs_x_m: 8.0
+      z_m: [90.0, 108.0]
+      vx_m_s: [-3.0, 3.0]
+      vz_m_s: [-23.5, -20.0]
+      theta_deg: [-7.0, 7.0]
+      omega_deg_s: [-3.0, 3.0]
+      mass_kg: [962.0, 980.0]
+  coverage:
+    bins_per_feature: 8
+    minimum_count_per_bin: 30
+    seed: 20261024
+    maximum_additional_cases: 160
+    maximum_rounds: 3
+  completion:
+    minimum_train_trajectories: 950
+    minimum_validation_trajectories: 95
+    minimum_test_trajectories: 180

@@ -831,6 +831,159 @@ def validate_config(config: Config) -> None:
                 "offline_dataset_generation progress_interval cannot exceed planned episodes"
             )
 
+        finalization = _mapping(config, "offline_dataset_finalization")
+        if set(finalization) != {
+            "schema_version",
+            "id",
+            "generation",
+            "hard_oversampling",
+            "coverage",
+            "completion",
+        }:
+            raise ConfigError("offline_dataset_finalization keys are invalid")
+        if finalization.get("schema_version") != 1:
+            raise ConfigError("offline_dataset_finalization.schema_version must be 1")
+        final_dataset_id = finalization.get("id")
+        if not isinstance(final_dataset_id, str) or not final_dataset_id.strip():
+            raise ConfigError("offline_dataset_finalization.id must be a nonempty string")
+
+        final_generation = _mapping(finalization, "generation")
+        if set(final_generation) != {
+            "runner",
+            "attempt_timeout_s",
+            "max_retries",
+            "warm_start",
+            "retry_initial_guess",
+            "worker_restart_after_attempts",
+            "replay_dt_s",
+            "progress_interval",
+        }:
+            raise ConfigError("offline_dataset_finalization generation keys are invalid")
+        if final_generation.get("runner") != "sequential_subprocess":
+            raise ConfigError("offline_dataset_finalization runner is invalid")
+        _positive(final_generation, "attempt_timeout_s")
+        _nonnegative_integer(final_generation, "max_retries")
+        if final_generation.get("warm_start") != "previous_success":
+            raise ConfigError("offline_dataset_finalization warm_start is invalid")
+        if final_generation.get("retry_initial_guess") != "pid":
+            raise ConfigError("offline_dataset_finalization retry_initial_guess is invalid")
+        _positive_integer(final_generation, "worker_restart_after_attempts")
+        final_replay_dt = _positive(final_generation, "replay_dt_s")
+        if final_replay_dt >= dt:
+            raise ConfigError(
+                "offline_dataset_finalization replay_dt_s must be below simulation.dt_s"
+            )
+        _positive_integer(final_generation, "progress_interval")
+
+        hard = _mapping(finalization, "hard_oversampling")
+        if set(hard) != {
+            "sampler",
+            "difficulty",
+            "episodes",
+            "seed",
+            "candidate_multiplier",
+            "hardest_fraction",
+            "score",
+            "ranges",
+        }:
+            raise ConfigError("offline_dataset_finalization hard_oversampling keys are invalid")
+        if hard.get("sampler") != "difficulty_oversampled_v1":
+            raise ConfigError("offline_dataset_finalization hard sampler is invalid")
+        if hard.get("difficulty") != "expanded_train_challenge":
+            raise ConfigError("offline_dataset_finalization hard difficulty is invalid")
+        _positive_integer(hard, "episodes")
+        _nonnegative_integer(hard, "seed")
+        candidate_multiplier = _positive_integer(hard, "candidate_multiplier")
+        if candidate_multiplier < 2:
+            raise ConfigError(
+                "offline_dataset_finalization candidate_multiplier must be at least 2"
+            )
+        hardest_fraction = _positive(hard, "hardest_fraction")
+        if hardest_fraction > 1.0:
+            raise ConfigError("offline_dataset_finalization hardest_fraction cannot exceed 1")
+        if hard.get("score") != "normalized_mean_v1":
+            raise ConfigError("offline_dataset_finalization hard score is invalid")
+        hard_ranges = _mapping(hard, "ranges")
+        if set(hard_ranges) != range_keys:
+            raise ConfigError("offline_dataset_finalization hard range keys are invalid")
+        hard_x = _range(hard_ranges, "x_m")
+        hard_min_abs_x = _positive(hard_ranges, "min_abs_x_m")
+        hard_z = _range(hard_ranges, "z_m")
+        hard_vx = _range(hard_ranges, "vx_m_s")
+        hard_vz = _range(hard_ranges, "vz_m_s")
+        hard_theta = _range(hard_ranges, "theta_deg")
+        hard_omega = _range(hard_ranges, "omega_deg_s")
+        hard_mass = _range(hard_ranges, "mass_kg")
+        if not hard_x[0] < target_x - hard_min_abs_x < target_x + hard_min_abs_x < hard_x[1]:
+            raise ConfigError("offline_dataset_finalization hard x_m range is invalid")
+        if hard_z[0] <= ground or hard_vz[1] >= 0.0:
+            raise ConfigError("offline_dataset_finalization hard flight ranges are invalid")
+        if hard_mass[0] <= dry_mass + reserve:
+            raise ConfigError("offline_dataset_finalization hard mass range is invalid")
+        if max(abs(hard_theta[0]), abs(hard_theta[1])) > tilt_limit:
+            raise ConfigError("offline_dataset_finalization hard theta exceeds solver limit")
+        if max(abs(hard_omega[0]), abs(hard_omega[1])) > angular_rate_limit:
+            raise ConfigError("offline_dataset_finalization hard omega exceeds solver limit")
+
+        train_max_abs_x = max(abs(value) for value in train_ranges["x_m"])
+        hard_max_abs_x = max(abs(value) for value in hard_x)
+        expanded_train_checks = (
+            hard_max_abs_x > train_max_abs_x,
+            hard_z[1] > train_ranges["z_m"][1],
+            hard_vx[0] < train_ranges["vx_m_s"][0] and hard_vx[1] > train_ranges["vx_m_s"][1],
+            hard_vz[0] < train_ranges["vz_m_s"][0],
+            hard_theta[0] < train_ranges["theta_deg"][0]
+            and hard_theta[1] > train_ranges["theta_deg"][1],
+            hard_omega[0] < train_ranges["omega_deg_s"][0]
+            and hard_omega[1] > train_ranges["omega_deg_s"][1],
+            hard_mass[0] < train_ranges["mass_kg"][0],
+        )
+        if not all(expanded_train_checks):
+            raise ConfigError("offline_dataset_finalization hard ranges must expand train")
+        final_test_checks = (
+            test_ranges["min_abs_x_m"] > hard_max_abs_x,
+            test_ranges["z_m"][0] > hard_z[1],
+            test_ranges["vz_m_s"][1] < hard_vz[0],
+            test_ranges["mass_kg"][1] < hard_mass[0],
+            test_ranges["vx_m_s"][0] < hard_vx[0] and test_ranges["vx_m_s"][1] > hard_vx[1],
+            test_ranges["theta_deg"][0] < hard_theta[0]
+            and test_ranges["theta_deg"][1] > hard_theta[1],
+            test_ranges["omega_deg_s"][0] < hard_omega[0]
+            and test_ranges["omega_deg_s"][1] > hard_omega[1],
+        )
+        if not all(final_test_checks):
+            raise ConfigError("offline_dataset_finalization test must remain harder than train")
+
+        coverage = _mapping(finalization, "coverage")
+        if set(coverage) != {
+            "bins_per_feature",
+            "minimum_count_per_bin",
+            "seed",
+            "maximum_additional_cases",
+            "maximum_rounds",
+        }:
+            raise ConfigError("offline_dataset_finalization coverage keys are invalid")
+        _positive_integer(coverage, "bins_per_feature")
+        _positive_integer(coverage, "minimum_count_per_bin")
+        _nonnegative_integer(coverage, "seed")
+        _positive_integer(coverage, "maximum_additional_cases")
+        _positive_integer(coverage, "maximum_rounds")
+
+        completion = _mapping(finalization, "completion")
+        if set(completion) != {
+            "minimum_train_trajectories",
+            "minimum_validation_trajectories",
+            "minimum_test_trajectories",
+        }:
+            raise ConfigError("offline_dataset_finalization completion keys are invalid")
+        _positive_integer(completion, "minimum_train_trajectories")
+        minimum_validation = _positive_integer(completion, "minimum_validation_trajectories")
+        minimum_test = _positive_integer(completion, "minimum_test_trajectories")
+        if minimum_validation > int(splits["validation"]["episodes"]):
+            raise ConfigError("offline_dataset_finalization minimum validation count is invalid")
+        if minimum_test > int(splits["test"]["episodes"]):
+            raise ConfigError("offline_dataset_finalization minimum test count is invalid")
+
     baseline_protocol = config.get("baseline_protocol")
     if baseline_protocol is not None:
         if not isinstance(baseline_protocol, dict):
