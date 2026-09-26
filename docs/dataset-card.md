@@ -96,6 +96,10 @@ The Day 23 run executed all 800 easy train conditions and accepted 797 trajector
 
 Day 24 selected 160 challenge cases from 640 candidates, including the 120 highest difficulty scores; all 160 were accepted. Coverage analysis used eight bins per feature and a minimum of 30 trajectories per bin. One targeted round accepted 50 of 51 cases and reduced the total marginal deficit from 51 to zero. Validation accepted 100 of 100 and hard OOD test accepted 191 of 200. The nine hard-test failures and the one coverage failure are retained in the manifest, while all final shards contain accepted trajectories only. There were no cross-split initial-condition overlaps, timeouts, or post-solver filter rejections.
 
+## First model use (Day 25)
+
+The first `7-64-64-2` Behavior Cloning policy used 100,700 train and 10,000 IID validation state-action pairs. Its small-subset overfit check passed, and the best epoch 79 checkpoint reached normalized validation MSE `0.030977`, throttle MAE `0.032989`, and gimbal MAE `0.272693 deg`. The hard OOD test shard was not read during training or checkpoint selection. These are action-prediction measurements, not landing outcomes; closed-loop evaluation follows later.
+
 ## Known limitations
 
 - The model is planar 3-DoF, not a 3D or 6-DoF vehicle.

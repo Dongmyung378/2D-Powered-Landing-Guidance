@@ -678,3 +678,17 @@ python scripts/finalize_offline_dataset.py
 ~~~
 
 The command refuses to overwrite any output and atomically writes `dataset-manifest.json`, `normalization.json`, `dataset-distribution.png`, and one packed NPZ for each split under `artifacts/day24-final-dataset/`. Canonical shard SHA-256 values are train `4161bc93b6753bdcc84cfb6eec6afe1c45bbf814b34525817a7ec24835691e0d`, validation `e77b561f63f5738ec6e09e24b9dbffe2e4712ff33e7d186d12b4945e2aaa618c`, and test `6b67c7866e202b6719f07c733cd2cd82fdd3e2f1638c5bb33ec10ea3f3f5ba17`. The completion gate passed every source, oversampling, difficulty, coverage, count, shard, split-integrity, and normalization check.
+
+## 31. Day 25 Behavior Cloning training
+
+`scripts/train_behavior_cloning.py` reads `configs/bc-day25.yaml` and the Day 24 final dataset. It first verifies the manifest completion and split-integrity flags, the dataset configuration and Teacher digests, the train-only normalization record, and the train and validation shard schemas, counts, and canonical SHA-256 values. It does not load the hard OOD test shard. For each trajectory, the terminal state is excluded and its preceding `T` states are paired in order with `T` interval actions. The resulting matrices contain 100,700 train pairs and 10,000 IID validation pairs.
+
+The first policy has widths `7-64-64-2`, ReLU hidden layers, and a linear normalized-action output. State and action features use the Day 24 train-fitted standard scores. The objective is the mean of the two normalized squared action errors. Mini-batch Adam uses batch size 1,024, learning rate 0.001, seed `20260925`, at most 80 epochs, and patience 12 with minimum validation improvement `1e-5`. The checkpoint with the smallest IID validation MSE is restored for reporting and export. At inference, the seven-state input is normalized, the two predicted actions are returned to physical units, and throttle and gimbal are clipped to the configured actuator bounds.
+
+Before full training, an independent model must fit 16 train pairs to normalized MSE at most `0.0025` within 2,000 optimizer steps. The actual check reached `0.000707` at step 125. The full run selected epoch 79 of 80. At that checkpoint, train MSE was `0.024989`, IID validation MSE `0.030977`, validation throttle MAE `0.032989`, and gimbal MAE `0.272693 deg`. The validation loss was still improving near the epoch limit, so early stopping did not trigger in this run; a separate test exercises that branch.
+
+~~~bash
+python scripts/train_behavior_cloning.py
+~~~
+
+The ignored `artifacts/day25-bc/` directory contains a pickle-free NPZ checkpoint and a JSON report with the complete epoch history, physical action errors, overfit gate, settings, data provenance, and timing. The checkpoint embeds normalization and actuator limits. `load_checkpoint` verifies parameter shapes, float32 dtypes, finite values, and the exact expected NPZ fields. This is an open-loop supervised result only; closed-loop landing, wind, and hard OOD policy success have not yet been measured.

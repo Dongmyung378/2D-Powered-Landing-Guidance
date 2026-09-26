@@ -8,14 +8,14 @@ A reproducible 2D reusable-rocket powered-landing project that progresses from r
 
 | Item | Current status |
 |---|---|
-| Roadmap | Week 4 final offline dataset complete (Day 24) |
+| Roadmap | Day 25 first Behavior Cloning training complete |
 | Model | Planar 3-DoF with variable mass |
 | State | x, z, vx, vz, theta, omega, mass |
 | Action | throttle, gimbal angle |
 | Current controllers | Suicide-burn, vertical PID, horizontal-attitude, and integrated landing |
 | Runtime | Python 3.12.7 |
 
-The repository currently provides a tested simulation environment, frozen PID and optimal-control Teacher baselines, reproducible tuning, isolated-disturbance evaluation, and full planar 3-DoF optimal control. Day 24 finalized a leakage-free offline dataset with 1,007 train, 100 validation, and 191 hard OOD test trajectories. Its wider hard-biased train supplement, coverage repair, train-only normalization, and distribution audit are complete. Behavior Cloning, DAgger, combined uncertainty, and broader Monte Carlo evaluation remain later roadmap stages.
+The repository provides a tested simulation environment, frozen PID and optimal-control Teacher baselines, and a final offline dataset with 1,007 train, 100 validation, and 191 hard OOD test trajectories. Day 25 adds a NumPy MLP that learns throttle and gimbal commands from normalized Teacher state-action pairs. Architecture experiments, closed-loop BC landing, DAgger, and broad robustness evaluation follow in later days.
 
 ## Optimal-control teacher formulation
 
@@ -126,6 +126,19 @@ python scripts/finalize_offline_dataset.py
 ~~~
 
 The IID validation split accepted `100/100`. The hard OOD test accepted `191/200` (`95.5%`); all nine failures were preserved in the manifest after both warm-start and PID attempts failed fine replay, and no timeout or post-solver filter rejection occurred. The final shards have no duplicate initial-condition IDs within or across splits. Normalization is fitted only on the final train transitions. The command writes three packed shards, a versioned manifest, normalization statistics, and a distribution PNG under the Git-ignored `artifacts/day24-final-dataset/` directory and refuses to overwrite them. See the [Day 24 specification](docs/spec.md#30-day-24-final-offline-dataset) or [Korean version](docs/spec.ko.md#24일차-최종-offline-dataset).
+
+## Day 25 first Behavior Cloning policy
+
+The training command verifies the frozen Day 24 manifest, train and validation shard digests, split identities, and train-only normalization before loading paired nonterminal states and Teacher actions. A two-hidden-layer `64-64` ReLU MLP predicts normalized throttle and gimbal commands. Mini-batch Adam training uses seed `20260925`, a separate IID validation split for checkpoint selection, and early stopping with patience 12. The hard OOD test shard is not loaded or used for model selection.
+
+~~~bash
+python -m pip install -e ".[optimization]"
+python scripts/train_behavior_cloning.py
+~~~
+
+The small-subset overfit check reached normalized MSE `0.000707` on 16 training pairs in 125 steps, below its `0.0025` threshold. The first full run used 100,700 train and 10,000 validation pairs. Its best checkpoint was at epoch 79 of 80 with train MSE `0.024989` and IID validation MSE `0.030977`. Validation mean absolute action error was `0.03299` throttle and `0.273` degrees gimbal. Early stopping is implemented and tested; this run reached its epoch limit while validation was still improving.
+
+The Git-ignored `artifacts/day25-bc/` directory contains `bc-checkpoint.npz` and `training-report.json`. The checkpoint includes the model, normalization, actuator limits, training settings, dataset digests, and selected epoch, and can be loaded with `load_checkpoint` from `powered_landing_guidance.behavior_cloning`. These supervised action errors do not measure landing success. Closed-loop landing and the hard OOD evaluation are scheduled for later days. See the [Day 25 specification](docs/spec.md#31-day-25-behavior-cloning-training) and [Korean version](docs/spec.ko.md#25일차-behavior-cloning-학습).
 
 ## Frozen Week 2 PID baseline
 
@@ -424,7 +437,7 @@ The tracked repository contains only source code, reproducible configuration, te
 - Week 1: simulator, event handling, logging, replay, and numerical verification - complete
 - Week 2: suicide-burn and frozen PID baseline - complete
 - Week 3: constrained optimal-control teacher - full planar solver, numerical tuning, 100-case pipeline, validation, comparison, and protocol freeze complete
-- Week 4: final 1,007/100/191 train/validation/hard-test offline dataset complete; Behavior Cloning next
+- Week 4: final 1,007/100/191 offline dataset and Day 25 first BC checkpoint complete; architecture and closed-loop tests next
 - Week 5: DAgger closed-loop improvement
 - Week 6: disturbances and Monte Carlo evaluation
 - Week 7: report, comparison visuals, and interactive demo

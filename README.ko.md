@@ -8,14 +8,14 @@
 
 | 항목 | 현재 상태 |
 |---|---|
-| 로드맵 | 4주차 최종 offline dataset 완료(24일차) |
+| 로드맵 | 25일차 Behavior Cloning 첫 학습 완료 |
 | 모델 | 가변 질량 평면 3자유도 |
 | 상태 | x, z, vx, vz, theta, omega, mass |
 | 제어 | throttle, gimbal angle |
 | 현재 제어기 | Suicide-burn, 수직 PID, 수평·자세 제어, 통합 착륙 제어 |
 | 실행 환경 | Python 3.12.7 |
 
-현재 저장소에는 검증된 시뮬레이션 환경, 동결 PID·최적제어 Teacher 기준선, 재현 가능한 튜닝, 분리 외란 평가와 전체 평면 3자유도 최적제어가 구현되어 있습니다. 24일차에는 train 1,007개, validation 100개, hard OOD test 191개로 구성된 leakage 없는 최종 offline dataset을 완성했습니다. 더 넓은 난이도 편향 train 보강, coverage 복구, train 전용 normalization과 분포 검사까지 끝났습니다. Behavior Cloning, DAgger, 복합 불확실성과 더 넓은 Monte Carlo 평가는 이후 로드맵에서 진행합니다.
+현재 저장소에는 검증된 시뮬레이션 환경, 동결 PID·최적제어 Teacher 기준선, train 1,007개·validation 100개·hard OOD test 191개의 최종 offline dataset이 있습니다. 25일차에는 정규화한 Teacher 상태-action pair에서 throttle과 gimbal을 학습하는 NumPy MLP를 추가했습니다. 모델 구조 실험, BC 폐루프 착륙, DAgger와 폭넓은 강건성 평가는 이후 일정입니다.
 
 ## 최적제어 Teacher 문제 정식화
 
@@ -126,6 +126,19 @@ python scripts/finalize_offline_dataset.py
 ~~~
 
 IID validation은 `100/100`, hard OOD test는 `191/200`(`95.5%`)이 채택됐습니다. Hard test 실패 9개는 warm-start와 PID 시도 모두 세밀한 재적분을 통과하지 못한 기록으로 manifest에 보존했습니다. Timeout과 solver 성공 후 filter 탈락은 없습니다. 세 최종 shard에는 split 내부 또는 split 사이 initial-condition ID 중복이 없고, normalization은 최종 train transition만 사용합니다. 명령은 Git에서 제외되는 `artifacts/day24-final-dataset/`에 packed shard 3개, version manifest, normalization 통계와 분포 PNG를 저장하며 기존 결과를 덮어쓰지 않습니다. 자세한 내용은 [24일차 기술 명세](docs/spec.ko.md#24일차-최종-offline-dataset) 또는 [영문 명세](docs/spec.md#30-day-24-final-offline-dataset)에서 확인할 수 있습니다.
+
+## 25일차 Behavior Cloning 첫 정책
+
+학습 명령은 동결된 24일차 manifest, train·validation shard digest, split ID와 train 전용 정규화를 확인한 뒤 비종단 상태와 Teacher action을 짝지어 읽습니다. 은닉층 `64-64`의 ReLU MLP가 정규화된 throttle·gimbal 명령을 예측합니다. Seed `20260925`의 미니배치 Adam 학습은 분리된 IID validation으로 최고 checkpoint를 선택하며 patience 12의 조기 종료를 지원합니다. Hard OOD test shard는 읽거나 모델 선택에 사용하지 않습니다.
+
+~~~bash
+python -m pip install -e ".[optimization]"
+python scripts/train_behavior_cloning.py
+~~~
+
+작은 train 부분집합 16개에 대한 과적합 검사는 125단계에서 정규화 MSE `0.000707`을 기록해 기준 `0.0025`를 통과했습니다. 첫 전체 학습은 train 100,700 pair와 validation 10,000 pair를 사용했습니다. 80 epoch 중 최고 checkpoint는 79 epoch로 train MSE `0.024989`, IID validation MSE `0.030977`입니다. Validation 평균 절대 action 오차는 throttle `0.03299`, gimbal `0.273도`였습니다. 조기 종료 기능은 테스트로 확인했으며 이번 실행은 validation이 계속 개선되어 최대 epoch까지 진행됐습니다.
+
+Git에서 제외된 `artifacts/day25-bc/`에는 `bc-checkpoint.npz`와 `training-report.json`이 있습니다. Checkpoint는 모델, 정규화, 구동기 제한, 학습 설정, 데이터셋 digest와 선택 epoch를 포함하며 `powered_landing_guidance.behavior_cloning`의 `load_checkpoint`로 읽습니다. 이 지도학습 action 오차는 착륙 성공률이 아닙니다. 폐루프 착륙과 hard OOD 평가는 이후 일정에서 측정합니다. [25일차 기술 명세](docs/spec.ko.md#25일차-behavior-cloning-학습)와 [영문 명세](docs/spec.md#31-day-25-behavior-cloning-training)를 참고하세요.
 
 ## 동결된 2주차 PID 기준선
 
@@ -424,7 +437,7 @@ Git에 포함되는 저장소에는 소스 코드, 재현 가능한 설정, 기�
 - 1주차: 시뮬레이터, 사건 처리, 기록, 재생과 수치 검증 - 완료
 - 2주차: suicide-burn과 동결 PID 기준선 - 완료
 - 3주차: 제약 최적제어 Teacher - 전체 평면 solver, 수치 튜닝, 100-case pipeline, 검증, 비교와 protocol 동결 완료
-- 4주차: train/validation/hard-test 1,007/100/191개 최종 offline dataset 완료, Behavior Cloning 진행 예정
+- 4주차: train/validation/hard-test 1,007/100/191개 최종 offline dataset과 25일차 BC 첫 checkpoint 완료, 모델 실험과 폐루프 검증 예정
 - 5주차: DAgger 폐루프 개선
 - 6주차: 외란과 Monte Carlo 평가
 - 7주차: 보고서, 비교 시각화와 조작 화면

@@ -96,6 +96,10 @@ Dataset manifest는 생성, 채택, 재시도, timeout, 실패와 필터 제외 
 
 24일차에는 후보 640개 중 난이도 상위 120개를 포함한 challenge 160개를 선택했고 모두 채택했습니다. Coverage는 feature마다 8구간, 구간당 최소 30개를 사용했습니다. 한 번의 표적 보강에서 51개 중 50개가 채택되어 전체 marginal deficit이 51에서 0으로 줄었습니다. Validation은 100개 중 100개, hard OOD test는 200개 중 191개를 채택했습니다. Hard test 실패 9개와 coverage 실패 1개는 manifest에 보존하고 최종 shard에는 채택 궤적만 넣었습니다. Split 사이 initial-condition 중복, timeout과 solver 성공 후 filter 탈락은 없습니다.
 
+## 첫 모델 사용 결과(25일차)
+
+첫 `7-64-64-2` Behavior Cloning 정책은 train 상태-action pair 100,700개와 IID validation 10,000개를 사용했습니다. 작은 부분집합 과적합 검사를 통과했고, 최고 79 epoch checkpoint의 정규화 validation MSE는 `0.030977`, throttle MAE는 `0.032989`, gimbal MAE는 `0.272693도`였습니다. 학습과 checkpoint 선택 중 hard OOD test shard는 읽지 않았습니다. 이 수치는 action 예측 오차이며 착륙 결과는 이후 폐루프 평가에서 측정합니다.
+
 ## 알려진 한계
 
 - 모델은 평면 3자유도이며 3D 또는 6자유도 기체가 아닙니다.

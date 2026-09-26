@@ -681,3 +681,17 @@ python scripts/finalize_offline_dataset.py
 ~~~
 
 명령은 기존 결과를 덮어쓰지 않고 `artifacts/day24-final-dataset/`에 `dataset-manifest.json`, `normalization.json`, `dataset-distribution.png`와 split별 packed NPZ를 원자적으로 저장합니다. Canonical shard SHA-256은 train `4161bc93b6753bdcc84cfb6eec6afe1c45bbf814b34525817a7ec24835691e0d`, validation `e77b561f63f5738ec6e09e24b9dbffe2e4712ff33e7d186d12b4945e2aaa618c`, test `6b67c7866e202b6719f07c733cd2cd82fdd3e2f1638c5bb33ec10ea3f3f5ba17`입니다. 원본, 과표집, 난이도, coverage, 개수, shard, split integrity와 normalization 완료 검사가 모두 통과했습니다.
+
+## 25일차 Behavior Cloning 학습
+
+`scripts/train_behavior_cloning.py`는 `configs/bc-day25.yaml`과 24일차 최종 데이터셋을 읽습니다. 먼저 manifest 완료·split 무결성, dataset 설정과 Teacher digest, train 전용 normalization, train·validation shard의 schema·개수·canonical SHA-256을 검사합니다. Hard OOD test shard는 읽지 않습니다. 각 trajectory에서 마지막 종단 상태를 제외한 상태 `T`개와 구간 action `T`개를 순서대로 짝지어 train 100,700쌍과 IID validation 10,000쌍을 만듭니다.
+
+첫 정책은 `7-64-64-2` 폭의 ReLU 은닉층 2개와 선형 정규화 action 출력층을 사용합니다. 상태·action은 24일차 train에서만 계산한 표준점수로 변환합니다. 손실은 두 정규화 action의 제곱오차 평균입니다. 미니배치 Adam은 batch 1,024개, 학습률 0.001, seed `20260925`, 최대 80 epoch, patience 12, validation 최소 개선량 `1e-5`를 사용합니다. IID validation MSE가 가장 낮은 checkpoint를 최종 보고·저장합니다. 추론에서는 7상태를 정규화하고 예측 action을 물리 단위로 되돌린 뒤 설정된 throttle·gimbal 구동기 한계로 제한합니다.
+
+전체 학습 전 독립 모델이 train 16쌍에서 2,000단계 안에 정규화 MSE `0.0025` 이하로 내려가야 합니다. 실제 검사는 125단계에서 `0.000707`로 통과했습니다. 전체 학습에서는 80 epoch 중 79 epoch checkpoint가 선택됐습니다. 해당 모델의 train MSE는 `0.024989`, IID validation MSE는 `0.030977`, validation throttle MAE는 `0.032989`, gimbal MAE는 `0.272693도`입니다. 이번 실행은 epoch 상한에 가까울 때도 validation이 개선되어 조기 종료가 발생하지 않았으며, 별도 테스트에서 조기 종료 분기를 확인했습니다.
+
+~~~bash
+python scripts/train_behavior_cloning.py
+~~~
+
+Git에서 제외한 `artifacts/day25-bc/`에는 pickle을 사용하지 않는 NPZ checkpoint와 전체 epoch 기록, 물리 단위 action 오차, 부분집합 과적합 gate, 설정, 데이터 출처와 실행시간이 담긴 JSON 보고서가 있습니다. Checkpoint에는 정규화와 구동기 제한도 포함됩니다. `load_checkpoint`는 parameter 모양, float32 dtype, 유한값과 정확한 NPZ field를 검사합니다. 현재 수치는 열린고리 지도학습 오차이며 폐루프 착륙, 바람과 hard OOD 정책 성공률은 아직 측정하지 않았습니다.
